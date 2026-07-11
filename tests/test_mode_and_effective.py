@@ -195,6 +195,52 @@ def test_enqueue_live_covered_defers_when_live_then_brief():
     assert d._live_active is True  # must not cancel live
 
 
+def test_enqueue_live_covers_while_active_even_if_zero_spoken():
+    """Stop mid-first-message must not cancel live (segments counted only after play)."""
+    d = FocusAudioDaemon(
+        cfg=Config(mode="brief", live_verbatim=True, live_then_brief=True)
+    )
+    d._live_session_id = "s1"
+    d._live_segments = 0  # first clip still synthesizing / playing
+    d._live_active = True
+    scheduled: list = []
+    d._schedule_after_live_brief = (  # type: ignore[method-assign]
+        lambda sid, cwd: scheduled.append((sid, cwd))
+    )
+    # Must not start a post-turn job that hard-cancels live.
+    with patch("focus_audio.daemon.threading.Thread") as thr:
+        out = d.enqueue_session("s1", "/tmp", force=False)
+    assert out.get("deferred") == "live_then_brief"
+    assert scheduled == [("s1", "/tmp")]
+    assert d._live_active is True
+    # No cancel path: job thread for post-turn brief must not start here.
+    thr.assert_not_called()
+
+
+def test_enqueue_live_covers_when_queue_has_pending():
+    from focus_audio.live import LiveSegment, LiveSegmentQueue
+
+    d = FocusAudioDaemon(
+        cfg=Config(mode="verbatim", live_verbatim=True, live_then_brief=True)
+    )
+    d._live_session_id = "s1"
+    d._live_segments = 0
+    d._live_active = False  # edge: inactive but queue still draining
+    q = LiveSegmentQueue()
+    q.put(
+        LiveSegment(
+            text="queued",
+            cleaned="queued live message that is long enough to speak aloud",
+            index=0,
+        )
+    )
+    d._live_queue = q
+    out = d.enqueue_session("s1", force=False)
+    assert out.get("skipped") == "live_covered_verbatim"
+    assert d._live_queue is q  # not cleared
+    assert q.pending() == 1
+
+
 def test_enqueue_live_covered_skips_when_then_brief_off():
     d = FocusAudioDaemon(
         cfg=Config(

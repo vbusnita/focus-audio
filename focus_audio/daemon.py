@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import signal
 import socket
 import sys
@@ -15,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 from .config import Config, ensure_default_config, load_config, save_config
 from .ipc import is_daemon_alive
-from .live import iter_live_segments
+from .live import LiveSegment, LiveSegmentQueue, produce_live_segments
 from .paths import data_dir, last_brief_path, last_job_path, pid_path, socket_path
 from .pipeline import (
     PreparedAudio,
@@ -44,8 +45,10 @@ class FocusAudioDaemon:
         self._live_gen = 0
         self._live_session_id: Optional[str] = None
         self._live_cwd: Optional[str] = None
-        self._live_segments = 0
+        self._live_segments = 0  # accepted into queue (not only finished)
+        self._live_spoken = 0  # fully played to completion
         self._live_active = False
+        self._live_queue: Optional[LiveSegmentQueue] = None
         # Cancel token for deferred post-live brief (live_then_brief).
         self._post_live_token = 0
         self._last_mode_toggle_at = 0.0
@@ -64,25 +67,29 @@ class FocusAudioDaemon:
         if not self.cfg.enabled:
             return {"ok": True, "skipped": "disabled"}
 
-        # Stop-hook: if live already spoke this turn, let it finish (no immediate brief).
+        # Stop-hook: if live is covering this turn, let the segment queue drain
+        # fully (never interrupt mid-message / drop a queued sibling message).
         with self._lock:
             live_active = self._live_active
             live_sid = self._live_session_id
             live_segs = self._live_segments
+            live_q = self._live_queue
             skip_brief = bool(getattr(self.cfg, "live_skip_stop_brief", True))
             live_then = bool(getattr(self.cfg, "live_then_brief", True))
             # Post-turn path uses cfg.mode (or explicit override).
             post_mode = (mode or self.cfg.mode or "brief").lower()
-        if (
-            not after_live
-            and live_sid
+        live_pending = bool(live_q and (not live_q.closed or live_q.pending() > 0))
+        # Cover when live is still running OR has accepted/queued/spoken segments.
+        # Previously we required live_segs > 0 only after a full play-through, so
+        # Stop mid-first-message cancelled live and skipped later messages.
+        live_covers = bool(
+            live_sid
             and session_id
             and live_sid == session_id
-            and skip_brief
-            and live_segs > 0
-            and not force
-        ):
-            # Do not cancel live — it may still be synthesizing the final chunk.
+            and (live_active or live_segs > 0 or live_pending)
+        )
+        if not after_live and live_covers and skip_brief and not force:
+            # Do not cancel live — drain the queue to the last word.
             #
             # live_then_brief is for "hear live progress, then a *brief* summary".
             # When post-turn mode is already verbatim, a second pass re-reads the
@@ -146,22 +153,29 @@ class FocusAudioDaemon:
 
         # Bump job gen so a previous brief/speak job is cancelled; drop deferred brief.
         self._cancel_post_live()
+        live_q = LiveSegmentQueue()
         with self._lock:
             self._job_gen += 1
             self._live_gen += 1
             gen = self._live_gen
             job_gen = self._job_gen
+            # Hard-cancel any prior live queue so its consumer exits.
+            old_q = self._live_queue
+            self._live_queue = live_q
             self._live_active = True
             self._live_session_id = session_id
             self._live_cwd = cwd
             self._live_segments = 0
+            self._live_spoken = 0
             self._status = "live"
             self._error = None
             self._last_session = {"session_id": session_id, "cwd": cwd}
+        if old_q is not None:
+            old_q.clear()
 
         t = threading.Thread(
             target=self._run_live,
-            args=(gen, job_gen, session_id, cwd),
+            args=(gen, job_gen, session_id, cwd, live_q),
             daemon=True,
             name=f"focus-audio-live-{gen}",
         )
@@ -169,26 +183,36 @@ class FocusAudioDaemon:
         return {"ok": True, "live": gen, "session_id": session_id}
 
     def live_finish(self, reason: str = "finish") -> Dict[str, Any]:
-        """Signal live watch to stop after draining current play (keep segments count)."""
+        """Soft-stop: close the producer side; consumer drains the queue fully."""
         with self._lock:
             segs = self._live_segments
+            spoken = self._live_spoken
             sid = self._live_session_id
             active = self._live_active
-            # Soft-stop: mark inactive so the watcher exits after current segment.
-            self._live_active = False
+            live_q = self._live_queue
+        # Do not bump live_gen / stop the player — remaining queued messages
+        # must still play to the end.
+        if live_q is not None:
+            live_q.close()
         return {
             "ok": True,
             "action": "live_finish",
             "reason": reason,
             "was_active": active,
             "segments": segs,
+            "spoken": spoken,
             "session_id": sid,
         }
 
     def _cancel_live(self) -> None:
+        """Hard-cancel: abort producer, drop queue, mark inactive (caller stops player)."""
         with self._lock:
             self._live_gen += 1
             self._live_active = False
+            live_q = self._live_queue
+            self._live_queue = None
+        if live_q is not None:
+            live_q.clear()
 
     def _cancel_post_live(self) -> None:
         with self._lock:
@@ -280,21 +304,61 @@ class FocusAudioDaemon:
         job_gen: int,
         session_id: str,
         cwd: Optional[str],
+        live_q: LiveSegmentQueue,
     ) -> None:
+        """Producer enqueues segments; consumer plays each to completion in order.
+
+        Decoupling discovery from playback means a second (or final) message that
+        lands while the first is still speaking is queued, not used to interrupt
+        the player. Hard cancel (skip / new turn) clears the queue via live_gen.
+        """
         spoken = 0
         scripts: List[str] = []
-        try:
-            def still() -> bool:
-                return self._live_still(live_gen, job_gen)
 
-            for seg in iter_live_segments(
-                session_id,
-                self.cfg,
-                cwd=cwd,
-                still_active=still,
-            ):
+        def still() -> bool:
+            return self._live_still(live_gen, job_gen)
+
+        def on_accepted(_seg: LiveSegment, accepted: int) -> None:
+            # Count as soon as a message is queued so Stop treats the turn as
+            # live-covered even before the first clip finishes playing.
+            with self._lock:
+                if live_gen == self._live_gen:
+                    self._live_segments = accepted
+
+        prod = threading.Thread(
+            target=produce_live_segments,
+            kwargs={
+                "out": live_q,
+                "session_id": session_id,
+                "cfg": self.cfg,
+                "cwd": cwd,
+                "still_active": still,
+                "on_accepted": on_accepted,
+            },
+            daemon=True,
+            name=f"focus-audio-live-prod-{live_gen}",
+        )
+        prod.start()
+
+        try:
+            while still():
+                try:
+                    seg = live_q.get(timeout=0.15)
+                except queue.Empty:
+                    # Producer finished and closed with nothing left?
+                    if live_q.closed and live_q.pending() == 0:
+                        # get() re-queues END; try once more for a clean None.
+                        try:
+                            seg = live_q.get(timeout=0.05)
+                        except queue.Empty:
+                            break
+                    else:
+                        continue
+                if seg is None:
+                    break
                 if not still():
                     break
+
                 # First segment only: soft chime so you know live speech started.
                 if spoken == 0 and self.cfg.chime:
                     self._play_chime()
@@ -319,6 +383,8 @@ class FocusAudioDaemon:
                 if not still():
                     break
 
+                # Play this segment fully before taking the next from the queue.
+                # stream_synthesize_and_play blocks until audio ends (or cancel).
                 prepared = stream_synthesize_and_play(
                     ready,
                     self.cfg,
@@ -332,7 +398,10 @@ class FocusAudioDaemon:
                 spoken += 1
                 scripts.append(prepared.script)
                 with self._lock:
-                    self._live_segments = spoken
+                    self._live_spoken = spoken
+                    # Keep accepted count as the public "segments" metric; also
+                    # never drop below spoken.
+                    self._live_segments = max(self._live_segments, spoken)
                     self._last_prepared = prepared
                     last_job_path().write_text(
                         json.dumps(
@@ -340,6 +409,7 @@ class FocusAudioDaemon:
                                 "mode": "live_verbatim",
                                 "from_cache": prepared.from_cache,
                                 "segment": spoken,
+                                "accepted": self._live_segments,
                                 "audio": str(prepared.entry.audio_path),
                                 "script": str(prepared.entry.script_path),
                                 "streaming": False,
@@ -365,6 +435,8 @@ class FocusAudioDaemon:
                 with self._lock:
                     if live_gen == self._live_gen:
                         self._live_active = False
+                        if self._live_queue is live_q:
+                            self._live_queue = None
                         if self._status in ("live", "live_playing"):
                             self._status = "idle"
         except Exception as e:
@@ -373,7 +445,12 @@ class FocusAudioDaemon:
                     self._status = "error"
                     self._error = f"live: {e}"
                     self._live_active = False
+                    if self._live_queue is live_q:
+                        self._live_queue = None
                 traceback.print_exc(file=sys.stderr)
+        finally:
+            live_q.close()
+            prod.join(timeout=2.0)
 
     def enqueue_text(
         self,
@@ -787,10 +864,13 @@ class FocusAudioDaemon:
             live_active = self._live_active
             live_sid = self._live_session_id
             live_segs = self._live_segments
+            live_spoken = self._live_spoken
+            live_q = self._live_queue
             status = self._status
             err = self._error
             sess = self._last_session
             mode = self.cfg.mode
+        pending = live_q.pending() if live_q is not None else 0
         return {
             "ok": True,
             "status": status,
@@ -803,6 +883,8 @@ class FocusAudioDaemon:
                 "active": live_active,
                 "session_id": live_sid,
                 "segments": live_segs,
+                "spoken": live_spoken,
+                "pending": pending,
                 "enabled": bool(getattr(self.cfg, "live_verbatim", False)),
                 "then_brief": bool(getattr(self.cfg, "live_then_brief", True)),
                 "skip_stop_brief": bool(
