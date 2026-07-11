@@ -1,0 +1,49 @@
+{
+  "description": "Focus Audio — start/stop daemon with Grok sessions; optional live mid-turn speech; brief when each turn ends",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash run.sh ensure",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash run.sh live-start",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash run.sh release",
+            "timeout": 8
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash run.sh enqueue",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

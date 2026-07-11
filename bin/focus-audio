@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Focus Audio CLI — works from plugin install path, repo checkout, or PATH symlink.
+set -euo pipefail
+
+# Resolve symlinks so `ln -s ... ~/.local/bin/focus-audio` still finds the package.
+SCRIPT="${BASH_SOURCE[0]:-$0}"
+while [ -L "$SCRIPT" ]; do
+  link="$(readlink "$SCRIPT")"
+  case "$link" in
+    /*) SCRIPT="$link" ;;
+    *) SCRIPT="$(cd "$(dirname "$SCRIPT")" && pwd)/$link" ;;
+  esac
+done
+ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
+export PYTHONPATH="${ROOT}${PYTHONPATH:+:$PYTHONPATH}"
+
+if command -v python3 >/dev/null 2>&1; then
+  PY=python3
+else
+  PY=python
+fi
+
+exec "$PY" -m focus_audio.cli "$@"

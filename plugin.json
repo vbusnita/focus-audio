@@ -1,0 +1,16 @@
+{
+  "name": "focus-audio",
+  "version": "0.2.0",
+  "description": "Smart focus audio for Grok Build \u2014 spoken focus briefs via xAI TTS, optional experimental live mid-turn verbatim, global Ctrl+Shift hotkeys, and /audio skills.",
+  "author": {
+    "name": "vbusnita"
+  },
+  "keywords": [
+    "audio",
+    "tts",
+    "accessibility",
+    "focus",
+    "voice",
+    "hooks"
+  ]
+}
