@@ -13,7 +13,36 @@ from .paths import sessions_root
 
 
 CODE_FENCE_RE = re.compile(r"```([^\n`]*)\n([\s\S]*?)```", re.MULTILINE)
+# Unclosed fence to EOF (streaming / truncated replies).
+CODE_FENCE_OPEN_RE = re.compile(r"```([^\n`]*)\n([\s\S]*)$", re.MULTILINE)
 URL_RE = re.compile(r"https?://\S+")
+# Home / Users absolute paths (common in agent output).
+ABS_HOME_PATH_RE = re.compile(
+    r"(?:~|/Users/[\w.-]+)(?:/[\w.+@%-]+)+"
+)
+# Other absolute Unix paths with at least two segments after root.
+ABS_UNIX_PATH_RE = re.compile(r"(?<![\w:@])/([\w.-]+/){1,}[\w.+-]+")
+# Relative multi-segment paths ending in a file-ish name (a/b/c.py, plugins/x/y.md).
+REL_FILE_PATH_RE = re.compile(
+    r"(?<![\w/])(?:[\w.-]+/){1,}[\w.-]+\.[A-Za-z0-9]{1,12}\b"
+)
+# file.py:42 or path:12-34 line refs
+FILE_LINE_RE = re.compile(
+    r"\b([\w./+-]+\.[A-Za-z0-9]{1,12}):(\d{1,5})(?:-(\d{1,5}))?\b"
+)
+# Standalone "line 42" / "lines 10-20" / "L42-L58"
+LINE_REF_RE = re.compile(
+    r"\b(?:lines?\s+\d+(?:\s*[-–—]\s*\d+)?|L\d+(?:\s*[-–—]\s*L?\d+)?)\b",
+    re.IGNORECASE,
+)
+INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
+MD_HEADING_RE = re.compile(r"(?m)^#{1,6}\s+")
+MD_BULLET_RE = re.compile(r"(?m)^[ \t]*(?:[-*+]|\d+\.)\s+")
+MD_EMPHASIS_RE = re.compile(r"(\*\*|__|\*|_|~~)")
+# Pipe table: header row + separator + body rows.
+MD_TABLE_BLOCK_RE = re.compile(
+    r"(?m)^\|.+\|\s*\n\|[-:\s|]+\|\s*\n(?:\|.*\|\s*\n?)+",
+)
 
 
 @dataclass
@@ -106,20 +135,160 @@ def last_assistant_text(session_dir: Path) -> Optional[str]:
     return contents[-1]
 
 
+def path_basename(path: str) -> str:
+    """Speakable label for a filesystem path (basename only)."""
+    p = (path or "").strip().strip("`\"'")
+    if not p:
+        return ""
+    # Drop trailing slashes; keep last non-empty segment.
+    parts = [x for x in p.replace("\\", "/").split("/") if x and x != "~"]
+    if not parts:
+        return "home"
+    base = parts[-1]
+    # Skip pure ~ or empty after strip of dots
+    return base or "folder"
+
+
+def _fence_placeholder(lang: str, mode: str) -> str:
+    """Short speakable stand-in for a fenced code block (no line counts)."""
+    lang_tok = (lang or "").strip().split()[0] if (lang or "").strip() else ""
+    # Common fence labels that aren't languages
+    if lang_tok.lower() in ("", "code", "text", "txt", "plain"):
+        return "\n" if mode == "brief" else "\n[code sample]\n"
+    if mode == "brief":
+        # Prefer silence over "N lines of X" — brief LLM should describe purpose.
+        return "\n"
+    return f"\n[code sample in {lang_tok}]\n"
+
+
+def _replace_code_fences(text: str, mode: str) -> str:
+    def repl(m: re.Match) -> str:
+        return _fence_placeholder(m.group(1) or "", mode)
+
+    out = CODE_FENCE_RE.sub(repl, text)
+    # Truncated streaming fences
+    out = CODE_FENCE_OPEN_RE.sub(repl, out)
+    return out
+
+
+def _replace_urls(text: str) -> str:
+    def repl(m: re.Match) -> str:
+        url = m.group(0)
+        # Keep very short local-ish hosts somewhat recognizable; otherwise "link".
+        if len(url) <= 40 and re.search(r":\d{2,5}(?:/|$)", url):
+            # e.g. http://127.0.0.1:8787 → "local link"
+            return "local link"
+        if len(url) <= 32:
+            return url
+        return "link"
+
+    return URL_RE.sub(repl, text)
+
+
+def _replace_paths(text: str) -> str:
+    """Collapse absolute/relative multi-segment paths to basenames."""
+
+    def abs_repl(m: re.Match) -> str:
+        return path_basename(m.group(0))
+
+    def rel_repl(m: re.Match) -> str:
+        return path_basename(m.group(0))
+
+    # Order: home paths first (more specific), then other abs, then relative files.
+    out = ABS_HOME_PATH_RE.sub(abs_repl, text)
+    out = ABS_UNIX_PATH_RE.sub(abs_repl, out)
+    out = REL_FILE_PATH_RE.sub(rel_repl, out)
+    return out
+
+
+def _replace_file_line_refs(text: str) -> str:
+    def repl(m: re.Match) -> str:
+        return path_basename(m.group(1))
+
+    out = FILE_LINE_RE.sub(repl, text)
+    # Drop bare line-number phrases that sound bad spoken.
+    out = LINE_REF_RE.sub("", out)
+    return out
+
+
+def _replace_inline_code(text: str) -> str:
+    def repl(m: re.Match) -> str:
+        inner = m.group(1).strip()
+        if not inner:
+            return ""
+        # Path-like inline code → basename
+        if "/" in inner or inner.startswith("~"):
+            return path_basename(inner)
+        # Long tokens (hashes, keys) → drop or shorten
+        if len(inner) > 48 and " " not in inner:
+            return "identifier"
+        return inner
+
+    return INLINE_CODE_RE.sub(repl, text)
+
+
+def _collapse_markdown_tables(text: str, mode: str) -> str:
+    placeholder = "\n" if mode == "brief" else "\n[table summarized]\n"
+    return MD_TABLE_BLOCK_RE.sub(placeholder, text)
+
+
+def _flatten_markdown(text: str) -> str:
+    out = MD_HEADING_RE.sub("", text)
+    out = MD_BULLET_RE.sub("", out)
+    out = MD_EMPHASIS_RE.sub("", out)
+    return out
+
+
+def _cap_path_list_spam(text: str, max_names: int = 4) -> str:
+    """If many bare basenames with extensions appear in a row, compress the list.
+
+    Heuristic for agent file inventories: \"a.py, b.py, c.py, d.py, e.py\".
+    """
+    # Comma-separated list of 5+ file-like tokens
+    list_re = re.compile(
+        r"((?:[\w.-]+\.[A-Za-z0-9]{1,12})(?:\s*,\s*[\w.-]+\.[A-Za-z0-9]{1,12}){4,})"
+    )
+
+    def repl(m: re.Match) -> str:
+        names = [x.strip() for x in m.group(1).split(",")]
+        if len(names) <= max_names:
+            return m.group(1)
+        kept = ", ".join(names[:max_names])
+        more = len(names) - max_names
+        return f"{kept}, and {more} more files"
+
+    return list_re.sub(repl, text)
+
+
 def clean_for_audio(text: str, mode: str = "brief") -> str:
-    """Local pre-filter: replace code fences, shorten URLs, drop empty noise."""
+    """Local pre-filter so TTS and brief models hear speakable prose.
 
-    def _fence_repl(m: re.Match) -> str:
-        lang = (m.group(1) or "").strip() or "code"
-        body = m.group(2) or ""
-        lines = body.count("\n") + (1 if body.strip() else 0)
-        return f"\n[code block: ~{lines} lines of {lang}]\n"
+    Mode-aware:
+    - brief: drop code bodies and tables aggressively (no line counts).
+    - verbatim: keep short placeholders (\"code sample in python\") so structure
+      survives without reading dumps.
+    """
+    if not text:
+        return ""
+    use_mode = (mode or "brief").lower()
+    if use_mode not in ("brief", "verbatim"):
+        use_mode = "brief"
 
-    cleaned = CODE_FENCE_RE.sub(_fence_repl, text)
-    cleaned = URL_RE.sub(lambda m: m.group(0)[:48] + "…" if len(m.group(0)) > 50 else m.group(0), cleaned)
-    # Collapse excessive blank lines
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned
+    cleaned = text
+    cleaned = _replace_code_fences(cleaned, use_mode)
+    cleaned = _collapse_markdown_tables(cleaned, use_mode)
+    cleaned = _replace_urls(cleaned)
+    cleaned = _replace_inline_code(cleaned)
+    cleaned = _replace_file_line_refs(cleaned)
+    cleaned = _replace_paths(cleaned)
+    cleaned = _flatten_markdown(cleaned)
+    cleaned = _cap_path_list_spam(cleaned)
+    # Collapse leftover fence ticks and empty brackets noise
+    cleaned = cleaned.replace("```", "")
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r" +([,.;:!?])", r"\1", cleaned)
+    return cleaned.strip()
 
 
 def load_turn(
@@ -127,6 +296,7 @@ def load_turn(
     cwd: Optional[str] = None,
     min_chars: int = 80,
     root: Optional[Path] = None,
+    mode: str = "brief",
 ) -> Optional[TurnText]:
     session_dir = find_session_dir(session_id, cwd=cwd, root=root)
     if not session_dir:
@@ -134,7 +304,7 @@ def load_turn(
     raw = last_assistant_text(session_dir)
     if not raw:
         return None
-    cleaned = clean_for_audio(raw)
+    cleaned = clean_for_audio(raw, mode=mode)
     if len(cleaned) < min_chars:
         return None
     return TurnText(

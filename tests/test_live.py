@@ -95,4 +95,5 @@ def test_prepare_live_strips_code_fences():
     seg = prepare_live_segment(raw, cfg, index=0)
     assert seg is not None
     assert "print" not in seg.cleaned
-    assert "code block" in seg.cleaned
+    assert "code sample" in seg.cleaned.lower()
+    assert "lines of" not in seg.cleaned.lower()
