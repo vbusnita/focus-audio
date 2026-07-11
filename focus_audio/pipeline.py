@@ -391,13 +391,16 @@ def resolve_from_session(
 ) -> Optional[ScriptReady]:
     from .transcript import load_turn
 
-    turn = load_turn(session_id, cwd=cwd, min_chars=cfg.min_chars)
+    use_mode = (mode or cfg.mode or "brief").lower()
+    turn = load_turn(
+        session_id, cwd=cwd, min_chars=cfg.min_chars, mode=use_mode
+    )
     if not turn:
         return None
     return resolve_script(
         turn.cleaned,
         cfg,
-        mode=mode,
+        mode=use_mode,
         force=force,
         already_cleaned=True,
     )
