@@ -33,8 +33,9 @@ def test_effective_label_live_plus_mode():
         cfg=Config(mode="brief", live_verbatim=True, live_then_brief=True)
     )
     assert d.effective_label() == "live+brief"
+    # Verbatim after live would re-read the same reply — not live+verbatim.
     d.cfg.mode = "verbatim"
-    assert d.effective_label() == "live+verbatim"
+    assert d.effective_label() == "live_verbatim"
 
 
 def test_effective_label_live_only_when_then_brief_off():
@@ -208,6 +209,29 @@ def test_enqueue_live_covered_skips_when_then_brief_off():
     d._live_active = True
     out = d.enqueue_session("s1", force=False)
     assert out.get("skipped") == "live_covered"
+
+
+def test_enqueue_live_covered_skips_post_when_mode_verbatim():
+    """live + mode=verbatim + live_then_brief must not schedule a second full read."""
+    d = FocusAudioDaemon(
+        cfg=Config(
+            mode="verbatim",
+            live_verbatim=True,
+            live_then_brief=True,
+            live_skip_stop_brief=True,
+        )
+    )
+    d._live_session_id = "s1"
+    d._live_segments = 2
+    d._live_active = True
+    scheduled: list = []
+    d._schedule_after_live_brief = (  # type: ignore[method-assign]
+        lambda sid, cwd: scheduled.append((sid, cwd))
+    )
+    out = d.enqueue_session("s1", "/tmp", force=False)
+    assert out.get("skipped") == "live_covered_verbatim"
+    assert scheduled == []
+    assert d._live_active is True
 
 
 def test_enqueue_after_live_bypasses_skip():

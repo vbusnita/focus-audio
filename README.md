@@ -194,7 +194,7 @@ live_verbatim = false
 live_min_chars = 40
 live_poll_ms = 150
 live_skip_stop_brief = true
-# After live finishes, still play post-turn audio in `mode` (brief|verbatim)
+# After live finishes, also play post-turn `mode` (auto-skipped when mode=verbatim)
 live_then_brief = true
 ```
 
@@ -203,12 +203,13 @@ live_then_brief = true
 | Setting | What you hear |
 |---------|----------------|
 | `mode = brief` (default) | Post-turn / rebrief / mode-toggle: structured focus brief |
-| `mode = verbatim` | Post-turn: cleaned full reply |
+| `mode = verbatim` | Post-turn: cleaned full reply (or live-only if live already spoke) |
 | `live_verbatim = true` | Mid-turn: stream agent chunks as they land |
-| `live_then_brief = true` (default) | After live covers a turn, **also** play `mode` once live is done |
+| `live_then_brief = true` (default) | After live, also play **brief** once live is done |
+| `live` + `mode = verbatim` | **Live only** — no second full re-read (avoids double-speak) |
 | `live_then_brief = false` + `live_skip_stop_brief` | Live only — skip post-turn when live already spoke |
 
-`focus-audio status` reports **`effective`**: `brief`, `verbatim`, `live_verbatim`, or `live+brief` / `live+verbatim`.
+`focus-audio status` reports **`effective`**: `brief`, `verbatim`, `live_verbatim`, or `live+brief`.
 
 ### Playback latency
 
@@ -240,7 +241,7 @@ Behavior:
 |-------|--------|
 | `UserPromptSubmit` | `live-start` — tail from EOF, speak new `agent_message_chunk`s |
 | Mid-turn | Verbatim TTS per chunk (no brief rewrite model) |
-| `Stop` | If live already spoke ≥1 segment: with `live_then_brief` wait for live to finish then play `mode`; otherwise skip post-turn |
+| `Stop` | If live already spoke ≥1 segment: with `live_then_brief` and `mode=brief`, wait for live then play brief; if `mode=verbatim`, skip post-turn (live already covered the reply) |
 
 Disable with `focus-audio config --live false`.  
 Post-live brief: `focus-audio config --live-then-brief true|false`.  
@@ -262,8 +263,31 @@ cd plugins/focus-audio
 python3 -m pytest tests/ -q
 ```
 
+## Future improvements
+
+### Per-agent / per-session voices
+
+**Problem:** Today Focus Audio uses a single global `voice_id` (default **`ara`**). When several Grok agents or sessions run in parallel and all speak through the same daemon, every brief sounds the same — so you cannot tell by ear which agent or window the information came from.
+
+**Idea:** Assign distinct TTS voices so parallel work is auditorily separable:
+
+- **Per session / window** — map each Grok `session_id` (or workspace) to a voice from a small roster (e.g. ara, eve, rex, …).
+- **Per agent role** — when Grok exposes agent identity (main vs subagent / explore vs implement), pick a voice by role so “planner” and “implementer” never sound identical.
+- **Stable assignment** — hash session id (or agent id) into a fixed voice list so the same session keeps the same voice across turns and restarts.
+- **Optional overrides** — config like `voice_id` (default), `voices = ["ara", …]` for the pool, and maybe `session_voices = { "…" = "eve" }` for pinning.
+- **Queue / playback UX** — when multiple sessions enqueue, either play sequentially with a short spoken label (“Session two…”) or keep voice-only differentiation; chimes alone are not enough if the voice never changes.
+
+**Today’s workaround:** only one global voice; use `focus-audio config --voice <id>` (or `voice_id` in `config.toml`) to change the shared default. No per-agent routing yet.
+
+**Implementation sketch (when we pick this up):**
+
+1. Extend job payload (`enqueue` / live) with optional `voice_id` and stable `session_id` / agent label.
+2. Resolve effective voice in the daemon: override → session map → hash(session_id) % pool → `cfg.voice_id`.
+3. Pass that voice through cache keys and TTS (cache already keys on `voice_id`).
+4. Document available xAI voice ids and a recommended multi-agent roster.
+
 ## Notes
 
-- macOS first (`afplay`). Pause stops the clip; resume/restart plays from the start.
+- macOS first via **AVAudioPlayer** (true mid-file pause/resume). Falls back to `afplay` if needed. Restart always plays from the start.
 - Hooks are **fail-open** — audio never blocks coding.
 - New turns **cancel** in-flight synthesis so you always hear the latest state.

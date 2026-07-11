@@ -71,6 +71,8 @@ class FocusAudioDaemon:
             live_segs = self._live_segments
             skip_brief = bool(getattr(self.cfg, "live_skip_stop_brief", True))
             live_then = bool(getattr(self.cfg, "live_then_brief", True))
+            # Post-turn path uses cfg.mode (or explicit override).
+            post_mode = (mode or self.cfg.mode or "brief").lower()
         if (
             not after_live
             and live_sid
@@ -81,7 +83,11 @@ class FocusAudioDaemon:
             and not force
         ):
             # Do not cancel live — it may still be synthesizing the final chunk.
-            if live_then:
+            #
+            # live_then_brief is for "hear live progress, then a *brief* summary".
+            # When post-turn mode is already verbatim, a second pass re-reads the
+            # same reply after live just spoke it — skip that duplicate.
+            if live_then and post_mode != "verbatim":
                 self._schedule_after_live_brief(session_id, cwd)
                 return {
                     "ok": True,
@@ -91,11 +97,17 @@ class FocusAudioDaemon:
                     "mode": self.cfg.mode,
                     "effective": self.effective_label(),
                 }
+            reason = (
+                "live_covered_verbatim"
+                if live_then and post_mode == "verbatim"
+                else "live_covered"
+            )
             return {
                 "ok": True,
-                "skipped": "live_covered",
+                "skipped": reason,
                 "segments": live_segs,
                 "live_active": live_active,
+                "mode": self.cfg.mode,
             }
 
         # New post-turn job cancels any in-flight live watch / deferred brief.
@@ -247,9 +259,10 @@ class FocusAudioDaemon:
         if live_active or status in ("live", "live_playing"):
             return "live_verbatim"
         if live_on:
-            if live_then:
+            # Verbatim post-turn after live is redundant — treat as live-only.
+            if live_then and mode != "verbatim":
                 return f"live+{mode}"
-            if skip_stop:
+            if skip_stop or mode == "verbatim":
                 return "live_verbatim"
         return mode
 
@@ -782,7 +795,8 @@ class FocusAudioDaemon:
             "ok": True,
             "status": status,
             "error": err,
-            "playing": self.player.is_playing(),
+            "playing": self.player.is_playing() and not self.player.is_paused(),
+            "paused": self.player.is_paused(),
             "mode": mode,
             "effective": self.effective_label(),
             "live": {

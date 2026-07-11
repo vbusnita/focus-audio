@@ -13,6 +13,8 @@ from .paths import config_path
 
 DEFAULTS: Dict[str, Any] = {
     "enabled": True,
+    # Single global TTS voice today. Future: per-session / per-agent voices so
+    # parallel agents are distinguishable by ear (see README → Future improvements).
     "voice_id": "ara",
     "speed": 1.1,
     "language": "en",
@@ -39,7 +41,8 @@ DEFAULTS: Dict[str, Any] = {
     "live_poll_ms": 150,
     # When live spoke at least one segment this turn, skip the immediate Stop-hook brief.
     "live_skip_stop_brief": True,
-    # After live finishes, still play a post-turn brief/verbatim in cfg.mode.
+    # After live finishes, also play post-turn audio in cfg.mode.
+    # Only applied when mode is *not* verbatim (verbatim+live would re-read twice).
     "live_then_brief": True,
 }
 
@@ -125,7 +128,8 @@ def _dump_toml_flat(data: Dict[str, Any]) -> str:
     lines = [
         "# Focus Audio config — edit freely; restart daemon to pick up most changes.",
         "# mode: brief | verbatim  (Ctrl+Shift+M re-speaks last turn in the new mode)",
-        "# live_verbatim: mid-turn speech; live_then_brief: after live, play mode brief too",
+        "# live_verbatim: mid-turn speech",
+        "# live_then_brief: after live, also play mode (skipped automatically when mode=verbatim)",
         "",
     ]
     for key, value in data.items():
