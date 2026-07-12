@@ -26,7 +26,28 @@ def _plugin_root() -> Path:
 
 
 def _focus_audio_disabled() -> bool:
+    """Env kill-switch (FOCUS_AUDIO=0) — strongest, process-wide."""
     return os.environ.get("FOCUS_AUDIO", "").strip().lower() in ("0", "false", "off", "no")
+
+
+def _config_disabled() -> bool:
+    """Persistent config.toml enabled=false (slash /audio-off)."""
+    try:
+        return not bool(load_config().enabled)
+    except Exception:
+        return False
+
+
+def _parse_on_off(value: Optional[str], *, current: bool) -> bool:
+    """Map on|off|true|false|toggle|None → bool. None/toggle flips current."""
+    if value is None or str(value).strip().lower() in ("", "toggle", "flip"):
+        return not current
+    s = str(value).strip().lower()
+    if s in ("1", "true", "yes", "on", "enable", "enabled"):
+        return True
+    if s in ("0", "false", "no", "off", "disable", "disabled"):
+        return False
+    raise ValueError(f"expected on|off|toggle, got {value!r}")
 
 
 def _hook_session_id(args_session_id: Optional[str] = None) -> str:
@@ -270,6 +291,9 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
     if _focus_audio_disabled():
         _hook_log("enqueue skipped: FOCUS_AUDIO disabled")
         return 0
+    if _config_disabled():
+        _hook_log("enqueue skipped: enabled=false")
+        return 0
 
     payload = _read_hook_payload()
     session_id, cwd = _resolve_hook_session(args, payload)
@@ -320,6 +344,9 @@ def cmd_live_start(args: argparse.Namespace) -> int:
         return 0
 
     cfg = load_config()
+    if not cfg.enabled:
+        _hook_log("live-start skipped: enabled=false")
+        return 0
     if not getattr(cfg, "live_verbatim", False):
         _hook_log("live-start skipped: live_verbatim=false")
         return 0
@@ -493,6 +520,85 @@ def cmd_mode(args: argparse.Namespace) -> int:
     return _control("mode", extra)
 
 
+def _apply_config_and_reload(cfg) -> Optional[dict]:
+    save_config(cfg)
+    return try_send({"cmd": "reload_config"})
+
+
+def cmd_live(args: argparse.Namespace) -> int:
+    """Toggle or set live_verbatim (mid-turn speech)."""
+    cfg = ensure_default_config()
+    prev = bool(cfg.live_verbatim)
+    try:
+        new = _parse_on_off(getattr(args, "state", None), current=prev)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    cfg.live_verbatim = new
+    reload_resp = _apply_config_and_reload(cfg)
+    # Turning live off: cancel any in-flight mid-turn speech.
+    stopped = False
+    if not new and is_daemon_alive():
+        try_send({"cmd": "skip"}, timeout=1.0)
+        stopped = True
+    out = {
+        "ok": True,
+        "live_verbatim": new,
+        "previous": prev,
+        "changed": new != prev,
+        "stopped_playback": stopped,
+        "enabled": bool(cfg.enabled),
+        "mode": cfg.mode,
+        "effective": (
+            "off"
+            if not cfg.enabled
+            else (
+                "live+brief"
+                if new and cfg.live_then_brief and cfg.mode != "verbatim"
+                else ("live_verbatim" if new else cfg.mode)
+            )
+        ),
+        "reload": reload_resp,
+    }
+    print(json.dumps(out, indent=2))
+    return 0
+
+
+def cmd_power(args: argparse.Namespace) -> int:
+    """Master switch: enabled on/off — silences brief, verbatim, and live."""
+    cfg = ensure_default_config()
+    prev = bool(cfg.enabled)
+    try:
+        new = _parse_on_off(getattr(args, "state", None), current=prev)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    cfg.enabled = new
+    reload_resp = _apply_config_and_reload(cfg)
+    stopped = False
+    if not new and is_daemon_alive():
+        # Hard stop: cancel live, deferred brief, and current clip.
+        try_send({"cmd": "skip"}, timeout=1.0)
+        stopped = True
+    out = {
+        "ok": True,
+        "enabled": new,
+        "previous": prev,
+        "changed": new != prev,
+        "stopped_playback": stopped,
+        "live_verbatim": bool(cfg.live_verbatim),
+        "mode": cfg.mode,
+        "note": (
+            "Focus Audio OFF — no live, brief, or verbatim until power on"
+            if not new
+            else "Focus Audio ON — hooks and autoplay resume"
+        ),
+        "reload": reload_resp,
+    }
+    print(json.dumps(out, indent=2))
+    return 0
+
+
 def cmd_config(args: argparse.Namespace) -> int:
     cfg = ensure_default_config()
     if args.show or not any(
@@ -504,6 +610,7 @@ def cmd_config(args: argparse.Namespace) -> int:
             args.model,
             args.live is not None,
             getattr(args, "live_then_brief", None) is not None,
+            getattr(args, "enabled", None) is not None,
         ]
     ):
         print(f"config: {config_path()}")
@@ -530,8 +637,14 @@ def cmd_config(args: argparse.Namespace) -> int:
         cfg.live_verbatim = bool(args.live)
     if getattr(args, "live_then_brief", None) is not None:
         cfg.live_then_brief = bool(args.live_then_brief)
+    if getattr(args, "enabled", None) is not None:
+        cfg.enabled = bool(args.enabled)
     save_config(cfg)
     try_send({"cmd": "reload_config"})
+    if getattr(args, "enabled", None) is False or (
+        args.live is False and is_daemon_alive()
+    ):
+        try_send({"cmd": "skip"}, timeout=1.0)
     print(f"Saved {config_path()}")
     return 0
 
@@ -635,6 +748,36 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("mode", nargs="?", choices=["brief", "verbatim"])
     m.set_defaults(func=cmd_mode)
 
+    live_p = sub.add_parser(
+        "live",
+        help="Toggle/set live mid-turn speech (live_verbatim)",
+    )
+    live_p.add_argument(
+        "state",
+        nargs="?",
+        default=None,
+        help="on|off|toggle (default: toggle)",
+    )
+    live_p.set_defaults(func=cmd_live)
+
+    power_p = sub.add_parser(
+        "power",
+        help="Master on/off — disables live + brief + verbatim when off",
+    )
+    power_p.add_argument(
+        "state",
+        nargs="?",
+        default=None,
+        help="on|off|toggle (default: toggle)",
+    )
+    power_p.set_defaults(func=cmd_power)
+
+    # Convenience aliases used by slash skills
+    off_p = sub.add_parser("off", help="Alias for: power off")
+    off_p.set_defaults(func=lambda _a: cmd_power(argparse.Namespace(state="off")))
+    on_p = sub.add_parser("on", help="Alias for: power on")
+    on_p.set_defaults(func=lambda _a: cmd_power(argparse.Namespace(state="on")))
+
     def _bool_arg(x: str) -> bool:
         return str(x).lower() in ("1", "true", "yes", "on")
 
@@ -644,6 +787,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--speed", type=float, default=None)
     c.add_argument("--mode", choices=["brief", "verbatim"], default=None)
     c.add_argument("--autoplay", type=_bool_arg, default=None)
+    c.add_argument(
+        "--enabled",
+        type=_bool_arg,
+        default=None,
+        help="Master switch (same as power on/off)",
+    )
     c.add_argument("--model", default=None)
     c.add_argument(
         "--live",

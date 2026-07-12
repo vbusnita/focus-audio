@@ -280,6 +280,9 @@ class FocusAudioDaemon:
             live_on = bool(getattr(self.cfg, "live_verbatim", False))
             live_then = bool(getattr(self.cfg, "live_then_brief", True))
             skip_stop = bool(getattr(self.cfg, "live_skip_stop_brief", True))
+            enabled = bool(self.cfg.enabled)
+        if not enabled:
+            return "off"
         if live_active or status in ("live", "live_playing"):
             return "live_verbatim"
         if live_on:

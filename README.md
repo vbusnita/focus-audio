@@ -120,6 +120,8 @@ In the Grok TUI: `/hooks` → confirm **focus-audio** SessionStart / SessionEnd 
 | `focus-audio speak-session <id>` | Speak last assistant turn of a session |
 | `focus-audio toggle` / `pause` / `restart` / `skip` | Playback control |
 | `focus-audio mode [brief\|verbatim]` | Switch/toggle mode, speak confirmation, re-speak last turn |
+| `focus-audio live [on\|off]` | Toggle/set live mid-turn speech (`live_verbatim`) |
+| `focus-audio power [on\|off]` / `on` / `off` | Master switch — off silences live + brief + verbatim |
 | `focus-audio rebrief` | Force regenerate last job |
 | `focus-audio status` | Daemon + lifecycle refs |
 | `focus-audio shutdown [--clear-refs]` | Stop daemon (optional orphan cleanup) |
@@ -136,6 +138,9 @@ In Grok Build, after each turn the **Stop** hook enqueues automatically. Manual:
 | `Ctrl+Shift+.` | Skip / stop | `/audio-skip` |
 | `Ctrl+Shift+B` | Re-brief last turn | `/audio-rebrief` |
 | `Ctrl+Shift+M` | Toggle brief ↔ verbatim (announce + re-speak last turn) | `/audio-mode` |
+| — | Toggle live mid-turn speech | `/audio-live` |
+| — | Master OFF (silence live + brief + verbatim) | `/audio-off` |
+| — | Master ON (re-enable after off) | `/audio-on` |
 | — | Speak last turn | `/listen` |
 | — | Help + status + key list | `/audio` |
 
@@ -228,11 +233,20 @@ user prompt and speaks **agent message** chunks as Grok writes them (status line
 tools + the final reply). This is *not* token-level streaming — Grok flushes narrative
 chunks periodically — but it starts audio **during** the turn instead of only on `Stop`.
 
-Enable:
+Enable (CLI or slash):
 
 ```bash
+focus-audio live on
+# or
 focus-audio config --live true
-# daemon reloads config; or restart: focus-audio shutdown && focus-audio ensure -v
+# or in Grok: /audio-live
+```
+
+Master silence (everything — live, brief, verbatim):
+
+```bash
+focus-audio off          # or: /audio-off
+focus-audio on           # or: /audio-on
 ```
 
 Behavior:
