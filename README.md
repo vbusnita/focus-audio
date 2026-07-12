@@ -230,6 +230,8 @@ python3 -m pytest tests/ -q
 
 [MIT](LICENSE) — use it, fork it, ship it. Bring **your** API key.
 
+Security reports: see [SECURITY.md](SECURITY.md) (private vulnerability reporting preferred).
+
 ## Future ideas
 
 - Per-session / per-agent TTS voices so parallel agents sound distinct
