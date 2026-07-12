@@ -2,7 +2,7 @@
 
 Smart **read-aloud companion** for [Grok Build](https://x.ai). When an agent turn finishes, Focus Audio rewrites the reply into a **spoken focus brief** (or cleaned **verbatim** audio) using **your** xAI chat + TTS keys — so you can listen instead of staring at a wall of text.
 
-**Requirements:** macOS (primary), [Grok Build](https://x.ai), Python 3.9+, an [xAI API key](https://console.x.ai/) with TTS access.
+**Requirements:** macOS (primary), [Grok Build](https://x.ai), Python 3.9+, an [xAI API key](https://console.x.ai/) with **API access, positive credit balance, and TTS** enabled.
 
 ## Why
 
@@ -96,7 +96,20 @@ focus-audio config --show
 # → api_key_source: keychain:… or env:XAI_API_KEY
 ```
 
-You pay for **your** xAI chat + TTS usage. There is no shared key and no account of ours involved.
+## Cost
+
+Focus Audio uses **your** [xAI API](https://console.x.ai/) account only. There is no shared key and no billing on our behalf.
+
+Each spoken turn may call:
+
+| Call | When |
+|------|------|
+| **Chat** | Rewrite a short focus brief (often **skipped** when the cleaned reply is already short) |
+| **TTS** | Generate the audio (live chunks and/or end-of-turn brief/verbatim) |
+
+You need an xAI account with **API access and a positive credit balance**. If the key is set but credits are empty (or TTS isn’t available on the key), install and `focus-audio doctor` can look fine while speech fails. Check usage and billing in the [xAI console](https://console.x.ai/); rates and free tiers change over time, so we don’t hard-code dollar amounts here.
+
+Cached replays (`Ctrl+Shift+R` / same content hash) do **not** re-call the API.
 
 ## Lifecycle
 
