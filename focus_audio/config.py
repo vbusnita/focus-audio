@@ -74,7 +74,7 @@ class Config:
     live_then_brief: bool = True
 
     def api_key(self) -> Optional[str]:
-        """Reuse ara-agent's Keychain entry; never read/write secrets from config.toml."""
+        """Resolve user API key (Keychain or env); never read/write secrets from config.toml."""
         from .secrets import get_api_key
 
         return get_api_key(self.api_key_env)

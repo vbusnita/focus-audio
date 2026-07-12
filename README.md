@@ -1,194 +1,170 @@
 # Focus Audio
 
-Smart **read-aloud companion** for [Grok Build](https://x.ai). When an agent turn finishes, Focus Audio rewrites the reply into a **spoken focus brief** (or cleaned **verbatim** audio) using xAI chat + TTS — so you can listen instead of staring at a wall of text.
+Smart **read-aloud companion** for [Grok Build](https://x.ai). When an agent turn finishes, Focus Audio rewrites the reply into a **spoken focus brief** (or cleaned **verbatim** audio) using **your** xAI chat + TTS keys — so you can listen instead of staring at a wall of text.
+
+**Requirements:** macOS (primary), [Grok Build](https://x.ai), Python 3.9+, an [xAI API key](https://console.x.ai/) with TTS access.
 
 ## Why
 
-Grok Build has voice **input**, not spoken agent replies. This plugin fills that gap with audio optimized for focus:
+Grok Build has voice **input**, not spoken agent replies. This plugin fills that gap:
 
 - **Brief mode (default):** what happened → what changed → what to do next (~45–90s)
-- **Verbatim mode:** cleaned full reply, code dumps replaced with short placeholders
-- **Harness metadata silence:** never speaks `Routed: …` lines or `harness-signal` JSON (session attribution)
+- **Verbatim mode:** cleaned full reply; code dumps become short placeholders
+- **Live mid-turn speech (optional):** hear agent chunks while the turn is still running
 - **Mode toggle re-speaks:** `Ctrl+Shift+M` announces the new mode, then re-synthesizes the last turn
 - Global **play / pause / restart / skip / rebrief / mode** controls
-- Master **on / off** (`/audio-on`, `/audio-off`) silences live + brief + verbatim
+- Master **on / off** (`/audio-on`, `/audio-off`)
 - Content-hash **cache** so restart is free
-- **Fast start:** short replies skip the rewrite model; longer ones stream TTS in chunks
-- **Experimental live verbatim:** speak mid-turn chunks; with **`live_then_brief`** (default on) still play a post-turn brief after live finishes
+- **Harness noise silence:** never speaks agent `Routed:` lines or `harness-signal` JSON blocks
+- Hooks are **fail-open** — audio never blocks coding
 
 ## Install
 
 ```bash
-# 1. Clone (private) and install as a trusted Grok plugin
-git clone git@github.com:vbusnita/focus-audio.git
+# 1. Clone and install as a trusted Grok plugin
+git clone https://github.com/vbusnita/focus-audio.git
 cd focus-audio
 chmod +x bin/focus-audio
 grok plugin install . --trust
 grok plugin list
-grok plugin details focus-audio
 
-# 2. API key — reuses ara-agent's macOS Keychain entry (nothing new to store)
-#    service: xai-api-key  ·  account: $USER
-#    Optional override only: export XAI_API_KEY=...
-#    Check: focus-audio config --show  → api_key_source / api_key_present
+# Optional: put CLI on PATH
+mkdir -p ~/.local/bin
+ln -sf "$(pwd)/bin/focus-audio" ~/.local/bin/focus-audio
 
-# 3. (Optional) global hotkeys — needs Accessibility permission on macOS
+# 2. Your xAI API key (Focus Audio never stores it in its config)
+export XAI_API_KEY="xai-…"
+# or, once on macOS Keychain (recommended):
+# security add-generic-password -a "$USER" -s "xai-api-key" -w "xai-…"
+
+# 3. Sanity check (prints no secrets)
+focus-audio doctor
+
+# 4. Optional global hotkeys
 pip3 install --user pynput
-
-# 4. Daemon lifecycle is automatic — no need to start manually:
-#    SessionStart → ensure (start daemon)
-#    SessionEnd   → release (stop if last Grok session)
-#    Stop         → enqueue spoken brief
+# Then: System Settings → Privacy & Security → Accessibility → allow Python/Terminal
 ```
 
-After editing the plugin source, reinstall or update:
+Open a **new** Grok Build session after install. SessionStart starts the daemon automatically.
 
 ```bash
-grok plugin install . --trust
-# or
-grok plugin update focus-audio
+# Already had Grok open? Either start a new session, or:
+focus-audio ensure -v
+focus-audio status
 ```
 
-For live development you can also symlink into `~/.grok/plugins/focus-audio` (user plugin dir); the CLI install path above is the packaged, supported flow.
+Smoke test without a session:
 
-### Lifecycle (gold standard)
+```bash
+echo "We fixed login and added tests. Next deploy staging." | focus-audio speak -
+```
+
+### Update
+
+```bash
+cd focus-audio && git pull
+grok plugin install . --trust
+# or: grok plugin update focus-audio
+```
+
+### Disable
+
+```bash
+focus-audio off              # master silence (config)
+# or
+export FOCUS_AUDIO=0         # process env kill-switch
+# or
+grok plugin disable focus-audio
+```
+
+## API key (your credentials only)
+
+Focus Audio **never** writes the key to `config.toml`, cache, or logs.
+
+| Priority | Source |
+|----------|--------|
+| 1 | macOS Keychain service `xai-api-key`, account `$USER` |
+| 2 | Env `XAI_API_KEY` (or `api_key_env` in config) |
+
+Verify without revealing the secret:
+
+```bash
+focus-audio doctor
+# or
+focus-audio config --show
+# → api_key_present: true
+# → api_key_source: keychain:… or env:XAI_API_KEY
+```
+
+You pay for **your** xAI chat + TTS usage. There is no shared key and no account of ours involved.
+
+## Lifecycle
 
 | Grok event | Focus Audio |
 |------------|-------------|
 | Session starts | `ensure` — refcount +1, spawn daemon if needed |
 | User submits prompt | `live-start` — if `live_verbatim`, tail `updates.jsonl` |
-| Turn ends | `enqueue` — synthesize + play brief (skipped if live already covered) |
-| Session ends / quit | `release` — refcount −1; **stop daemon when last session exits** |
+| Turn ends | `enqueue` — synthesize + play (skipped if live already covered) |
+| Session ends | `release` — refcount −1; stop daemon when last session exits |
 
-Multiple Grok windows share one daemon; only the last quit tears it down. Idle cost is tiny (Unix socket + accept loop). If Grok crashes without `SessionEnd`, clean up with:
+Multiple Grok windows share one daemon. If Grok crashes without SessionEnd:
 
 ```bash
 focus-audio shutdown --clear-refs
 ```
 
-Disable anytime:
-
-```bash
-export FOCUS_AUDIO=0
-# or
-./plugins/focus-audio/bin/focus-audio config --autoplay false
-# or
-grok plugin disable focus-audio
-```
-
-## How to start (quick)
-
-**Option A — automatic (preferred)**  
-Open a **new** Grok Build session after the plugin is installed.  
-`SessionStart` runs `ensure` and the daemon comes up by itself.
-
-If this session was already open when you installed the plugin, auto-start never ran for it. Either:
-
-```bash
-focus-audio ensure -v
-```
-
-…or start a fresh Grok session (`/new` or quit and relaunch).
-
-**Option B — manual**
-
-```bash
-focus-audio ensure -v          # start daemon + register a session ref
-focus-audio status             # should show daemon.ok = true
-# optional smoke test:
-echo "We fixed login.py and added tests. Next deploy staging." | focus-audio speak -
-```
-
-CLI path (if not already on PATH):
-
-```bash
-# already linked for this machine:
-~/.local/bin/focus-audio
-# or
-~/.grok/plugins/focus-audio/bin/focus-audio
-```
-
-In the Grok TUI: `/hooks` → confirm **focus-audio** SessionStart / SessionEnd / Stop are listed and enabled. Project may need `/hooks-trust` once.
+In the Grok TUI: `/hooks` → confirm **focus-audio** hooks are listed. You may need `/hooks-trust` once.
 
 ## Usage
 
 | Command | Purpose |
 |---------|---------|
+| `focus-audio doctor` | Install + key + daemon health check |
 | `focus-audio ensure` | SessionStart — start daemon + register session |
 | `focus-audio release` | SessionEnd — drop ref; stop if last session |
-| `focus-audio daemon` | Run player + IPC + hotkeys (foreground) |
-| `focus-audio enqueue` | Stop hook — queue current session turn |
 | `focus-audio speak -` | Speak stdin as brief |
 | `focus-audio speak-session <id>` | Speak last assistant turn of a session |
 | `focus-audio toggle` / `pause` / `restart` / `skip` | Playback control |
-| `focus-audio mode [brief\|verbatim]` | Switch/toggle mode, speak confirmation, re-speak last turn |
-| `focus-audio live [on\|off]` | Toggle/set live mid-turn speech (`live_verbatim`) |
-| `focus-audio power [on\|off]` / `on` / `off` | Master switch — off silences live + brief + verbatim |
+| `focus-audio mode [brief\|verbatim]` | Switch mode, announce, re-speak last turn |
+| `focus-audio live [on\|off]` | Mid-turn speech |
+| `focus-audio on` / `off` | Master power |
 | `focus-audio rebrief` | Force regenerate last job |
 | `focus-audio status` | Daemon + lifecycle refs |
-| `focus-audio shutdown [--clear-refs]` | Stop daemon (optional orphan cleanup) |
 | `focus-audio config` | Show/edit `~/.grok/focus-audio/config.toml` |
+| `focus-audio shutdown [--clear-refs]` | Stop daemon |
 
-In Grok Build, after each turn the **Stop** hook enqueues automatically. Manual: skill **`/listen`**.
+In Grok Build, the **Stop** hook enqueues automatically. Manual: **`/listen`**.
 
-### Hotkeys (daemon + `pynput` + Accessibility permission)
+### Hotkeys & slash commands
 
-| Shortcut | Action | Slash command |
-|----------|--------|---------------|
+| Shortcut | Action | Slash |
+|----------|--------|-------|
 | `Ctrl+Shift+Space` | Play / pause | `/audio-toggle` |
-| `Ctrl+Shift+R` | Restart current clip | `/audio-restart` |
+| `Ctrl+Shift+R` | Restart clip | `/audio-restart` |
 | `Ctrl+Shift+.` | Skip / stop | `/audio-skip` |
-| `Ctrl+Shift+B` | Re-brief last turn | `/audio-rebrief` |
-| `Ctrl+Shift+M` | Toggle brief ↔ verbatim (announce + re-speak last turn) | `/audio-mode` |
-| — | Toggle live mid-turn speech | `/audio-live` |
-| — | Master OFF (silence live + brief + verbatim) | `/audio-off` |
-| — | Master ON (re-enable after off) | `/audio-on` |
+| `Ctrl+Shift+B` | Re-brief | `/audio-rebrief` |
+| `Ctrl+Shift+M` | Toggle brief ↔ verbatim | `/audio-mode` |
+| — | Live mid-turn on/off | `/audio-live` |
+| — | Master off / on | `/audio-off` · `/audio-on` |
 | — | Speak last turn | `/listen` |
-| — | Help + status + key list | `/audio` |
+| — | Help + status | `/audio` |
 
-**Discovery limitations (Grok Build):**
-
-- `Ctrl+.` / `Ctrl+X` only lists *built-in* Grok bindings — plugins cannot inject into that cheatsheet.
-- **`Ctrl+P` does not reliably list Focus Audio skills** even when they are loaded and invocable. Use slash commands or global hotkeys instead.
-
-**How to use Focus Audio:**
-
-1. **Slash (works):** type `/audio` for the key list + status; `/audio-toggle`, `/listen`, etc.
-2. **Global hotkeys:** `Ctrl+Shift+…` system-wide when the daemon is running (macOS Accessibility for Terminal/Python).
-3. Optional check: `grok inspect` lists `audio` / `audio-toggle` under Skills.
-
-## API key (no extra secret storage)
-
-Same resolution order as **ara-agent** — the key is **never** written to Focus Audio config or cache:
-
-1. macOS Keychain via `keyring` — service `xai-api-key`, account `$USER`
-2. macOS Keychain via `security find-generic-password … -w`
-3. Env `XAI_API_KEY` (optional override)
-
-If you already use ara-agent, you are done. Verify:
-
-```bash
-./plugins/focus-audio/bin/focus-audio config --show
-# api_key_source: keychain:xai-api-key (…)
-# api_key_present: true
-```
+**Note:** Grok’s built-in cheatsheet does not list plugin bindings. Use slash commands or global hotkeys.
 
 ## Config
 
-`~/.grok/focus-audio/config.toml` (created on first run) — settings only, **no secrets**:
+`~/.grok/focus-audio/config.toml` — settings only, **no secrets**:
 
 ```toml
 enabled = true
 voice_id = "ara"
 speed = 1.1
 language = "en"
-mode = "brief"
+mode = "brief"              # brief | verbatim
 autoplay = true
 min_chars = 80
 max_brief_words = 220
-# Latency: skip chat rewrite when cleaned reply is already short
 skip_brief_words = 80
-# Stream TTS — first ~35 words speak ASAP while the rest synthesizes
 chunk_tts = true
 first_chunk_words = 35
 chunk_words = 90
@@ -196,122 +172,59 @@ tts_bit_rate = 96000
 model = "grok-4-1-fast-non-reasoning"
 chime = true
 hotkeys = true
-# Experimental mid-turn speech from session updates.jsonl
 live_verbatim = false
 live_min_chars = 40
 live_poll_ms = 150
 live_skip_stop_brief = true
-# After live finishes, also play post-turn `mode` (auto-skipped when mode=verbatim)
 live_then_brief = true
 ```
 
-### Mode vs live (mental model)
+### Mode vs live
 
 | Setting | What you hear |
 |---------|----------------|
-| `mode = brief` (default) | Post-turn / rebrief / mode-toggle: structured focus brief |
-| `mode = verbatim` | Post-turn: cleaned full reply (or live-only if live already spoke) |
-| `live_verbatim = true` | Mid-turn: stream agent chunks as they land |
-| `live_then_brief = true` (default) | After live, also play **brief** once live is done |
-| `live` + `mode = verbatim` | **Live only** — no second full re-read (avoids double-speak) |
-| `live_then_brief = false` + `live_skip_stop_brief` | Live only — skip post-turn when live already spoke |
+| `mode = brief` | Post-turn structured focus brief |
+| `mode = verbatim` | Cleaned full reply |
+| `live_verbatim = true` | Mid-turn agent chunks |
+| `live` + `mode = brief` + `live_then_brief` | Live, then a short brief after the turn |
+| `live` + `mode = verbatim` | Live only (no double full read) |
 
-`focus-audio status` reports **`effective`**: `brief`, `verbatim`, `live_verbatim`, or `live+brief`.
+`focus-audio status` reports **`effective`**: `brief`, `verbatim`, `live_verbatim`, `live+brief`, or `off`.
 
-### Playback latency
-
-Time-to-first-audio is optimized by:
-
-1. **Skip brief LLM** when the cleaned turn is ≤ `skip_brief_words` (default 80)
-2. **Chunked TTS** — synthesize a short first segment, start `afplay`, generate the rest in parallel
-3. **Slightly lower TTS bitrate** (`tts_bit_rate`, default 96k) for a smaller first download
-
-Cached replays and `Ctrl+Shift+R` remain near-instant.
-
-### Experimental live verbatim
-
-When `live_verbatim = true`, Focus Audio tails the session’s `updates.jsonl` after each
-user prompt and speaks **agent message** chunks as Grok writes them (status lines during
-tools + the final reply). This is *not* token-level streaming — Grok flushes narrative
-chunks periodically — but it starts audio **during** the turn instead of only on `Stop`.
-
-Enable (CLI or slash):
+### Live mid-turn
 
 ```bash
-focus-audio live on
-# or
-focus-audio config --live true
-# or in Grok: /audio-live
+focus-audio live on    # or /audio-live in Grok
 ```
 
-Master silence (everything — live, brief, verbatim):
-
-```bash
-focus-audio off          # or: /audio-off
-focus-audio on           # or: /audio-on
-```
-
-Behavior:
-
-| Event | Action |
-|-------|--------|
-| `UserPromptSubmit` | `live-start` — tail from EOF, speak new `agent_message_chunk`s |
-| Mid-turn | Verbatim TTS per chunk (no brief rewrite model) |
-| `Stop` | If live already spoke ≥1 segment: with `live_then_brief` and `mode=brief`, wait for live then play brief; if `mode=verbatim`, skip post-turn (live already covered the reply) |
-
-**Speakable pre-pass** (live + end-of-turn) always drops infra routing noise before TTS:
-
-- Lines starting with `Routed:`
-- Fenced `harness-signal` blocks (closed or open/streaming)
-- Bare JSON objects / residual lines with `harness_intent`, `packs_loaded`, `attribution_source`, etc.
-
-So session attribution stays in the transcript but is never read aloud.
-
-Disable with `focus-audio config --live false`.  
-Post-live brief: `focus-audio config --live-then-brief true|false`.  
-**Ctrl+Shift+.** still skips (cancels deferred post-live too).
+Tails `updates.jsonl` and speaks **agent message** chunks as Grok flushes them (not token-level streaming). The speakable pre-pass drops code dumps, long paths, and agent routing metadata (`Routed:`, `harness-signal`) so TTS stays listenable.
 
 ## Layout
 
 | Path | Role |
 |------|------|
-| `~/.grok/plugins/focus-audio/` | Installed plugin (this package) |
-| `~/.grok/focus-audio/` | Runtime data (config, cache, socket, last_brief.md) |
-| `hooks/hooks.json` | `Stop` → enqueue |
-| `skills/listen/` | `/listen` skill |
+| Install / clone | This package (`plugin.json`, hooks, skills) |
+| `~/.grok/plugins/focus-audio/` | Typical Grok install location |
+| `~/.grok/focus-audio/` | Runtime: config, cache, socket, logs |
 
 ## Tests
 
 ```bash
-cd plugins/focus-audio
 python3 -m pytest tests/ -q
 ```
 
-## Future improvements
+## License
 
-### Per-agent / per-session voices
+[MIT](LICENSE) — use it, fork it, ship it. Bring **your** API key.
 
-**Problem:** Today Focus Audio uses a single global `voice_id` (default **`ara`**). When several Grok agents or sessions run in parallel and all speak through the same daemon, every brief sounds the same — so you cannot tell by ear which agent or window the information came from.
+## Future ideas
 
-**Idea:** Assign distinct TTS voices so parallel work is auditorily separable:
-
-- **Per session / window** — map each Grok `session_id` (or workspace) to a voice from a small roster (e.g. ara, eve, rex, …).
-- **Per agent role** — when Grok exposes agent identity (main vs subagent / explore vs implement), pick a voice by role so “planner” and “implementer” never sound identical.
-- **Stable assignment** — hash session id (or agent id) into a fixed voice list so the same session keeps the same voice across turns and restarts.
-- **Optional overrides** — config like `voice_id` (default), `voices = ["ara", …]` for the pool, and maybe `session_voices = { "…" = "eve" }` for pinning.
-- **Queue / playback UX** — when multiple sessions enqueue, either play sequentially with a short spoken label (“Session two…”) or keep voice-only differentiation; chimes alone are not enough if the voice never changes.
-
-**Today’s workaround:** only one global voice; use `focus-audio config --voice <id>` (or `voice_id` in `config.toml`) to change the shared default. No per-agent routing yet.
-
-**Implementation sketch (when we pick this up):**
-
-1. Extend job payload (`enqueue` / live) with optional `voice_id` and stable `session_id` / agent label.
-2. Resolve effective voice in the daemon: override → session map → hash(session_id) % pool → `cfg.voice_id`.
-3. Pass that voice through cache keys and TTS (cache already keys on `voice_id`).
-4. Document available xAI voice ids and a recommended multi-agent roster.
+- Per-session / per-agent TTS voices so parallel agents sound distinct
+- Linux / Windows playback backends
+- Optional macOS app bundle for a stable Accessibility identity (hotkeys)
 
 ## Notes
 
-- macOS first via **AVAudioPlayer** (true mid-file pause/resume). Falls back to `afplay` if needed. Restart always plays from the start.
-- Hooks are **fail-open** — audio never blocks coding.
-- New turns **cancel** in-flight synthesis so you always hear the latest state.
+- macOS first via **AVAudioPlayer** (true mid-file pause/resume); `afplay` fallback
+- New turns cancel in-flight synthesis so you hear the latest state
+- Optional dependency: `pynput` for global hotkeys only

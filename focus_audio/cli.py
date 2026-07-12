@@ -659,6 +659,18 @@ def cmd_shutdown(args: argparse.Namespace) -> int:
     return code
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Install / credential / daemon health check (never prints secrets)."""
+    from .doctor import format_doctor_text, run_doctor
+
+    report = run_doctor(plugin_root=_plugin_root())
+    if getattr(args, "json", False):
+        print(json.dumps(report.to_dict(), indent=2))
+    else:
+        print(format_doctor_text(report))
+    return 0 if report.ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="focus-audio",
@@ -808,6 +820,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="After live mid-turn speech, also play post-turn brief/verbatim (mode)",
     )
     c.set_defaults(func=cmd_config)
+
+    doc = sub.add_parser(
+        "doctor",
+        help="Check install, API key presence, daemon, and hotkeys (no secrets printed)",
+    )
+    doc.add_argument(
+        "--json",
+        action="store_true",
+        help="Machine-readable report",
+    )
+    doc.set_defaults(func=cmd_doctor)
 
     return p
 

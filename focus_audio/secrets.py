@@ -1,11 +1,11 @@
-"""Resolve the xAI API key the same way ara-agent does — Keychain first, never store it.
+"""Resolve the user's xAI API key — Keychain first, env fallback. Never store it.
 
-ara-agent stores the key in macOS Keychain:
-  service: xai-api-key
-  account: $USER
-  via: keyring.get_password("xai-api-key", getpass.getuser())
+Lookup (never write secrets to config/cache/logs):
+  1. macOS Keychain service ``xai-api-key``, account ``$USER``
+     (keyring package or ``security`` CLI)
+  2. Environment variable ``XAI_API_KEY`` (or configured name)
 
-Focus Audio reuses that entry. We never write the key to config, cache, or logs.
+Compatible with tools that already use the same Keychain service name.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ import shutil
 import subprocess
 from typing import Optional
 
-# Same service name as ara-agent (voice_agent.get_api_key)
 KEYCHAIN_SERVICE = "xai-api-key"
 
 
@@ -74,7 +73,7 @@ def _from_env(api_key_env: str = "XAI_API_KEY") -> Optional[str]:
 def get_api_key(api_key_env: str = "XAI_API_KEY") -> Optional[str]:
     """Return the xAI API key, or None if not found.
 
-    Lookup order (matches ara-agent, with a pure-CLI Keychain fallback):
+    Lookup order:
       1. macOS Keychain via keyring (service ``xai-api-key``)
       2. macOS Keychain via ``security`` CLI
       3. Environment variable (``XAI_API_KEY`` / configured name)

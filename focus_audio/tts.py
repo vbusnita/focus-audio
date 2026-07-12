@@ -23,8 +23,9 @@ def synthesize_speech(
     api_key = cfg.api_key()
     if not api_key:
         raise RuntimeError(
-            "xAI API key not found. Focus Audio reuses ara-agent's Keychain entry "
-            f"(service `xai-api-key`) or ${cfg.api_key_env}."
+            "xAI API key not found. Set your own key via "
+            f"${cfg.api_key_env} or macOS Keychain service `xai-api-key` "
+            "(account $USER). Run: focus-audio doctor"
         )
 
     speak = text.strip()

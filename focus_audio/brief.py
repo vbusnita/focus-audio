@@ -55,9 +55,10 @@ def _chat_complete(cfg: Config, system: str, user: str) -> str:
     api_key = cfg.api_key()
     if not api_key:
         raise RuntimeError(
-            "xAI API key not found. Focus Audio reuses ara-agent's Keychain entry "
-            f"(service `xai-api-key`) or ${cfg.api_key_env}. "
-            "Store with: security add-generic-password -a \"$USER\" -s \"xai-api-key\" -w \"…\""
+            "xAI API key not found. Set your own key via "
+            f"${cfg.api_key_env} or macOS Keychain service `xai-api-key` "
+            '(account $USER). Example: security add-generic-password -a "$USER" '
+            '-s "xai-api-key" -w "…". Run: focus-audio doctor'
         )
 
     url = cfg.api_base.rstrip("/") + "/chat/completions"
