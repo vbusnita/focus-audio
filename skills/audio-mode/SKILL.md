@@ -17,7 +17,6 @@ Run this and report the JSON (mode, previous, rebrief, effective) in one short l
 ROOT="${GROK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.grok/plugins/focus-audio}}"
 BIN="$ROOT/bin/focus-audio"
 [ -x "$BIN" ] || BIN="$HOME/.grok/plugins/focus-audio/bin/focus-audio"
-[ -x "$BIN" ] || BIN="$HOME/.grok/plugins/focus-audio/bin/focus-audio"
 bash "$BIN" ensure >/dev/null 2>&1 || true
 bash "$BIN" mode
 ```

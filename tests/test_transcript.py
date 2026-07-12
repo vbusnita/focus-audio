@@ -27,7 +27,7 @@ def test_encode_cwd_url_style():
 
 
 def test_path_basename():
-    assert path_basename("/Users/example/projects/plugins/focus-audio/daemon.py") == "daemon.py"
+    assert path_basename("/Users/example/projects/focus-audio/daemon.py") == "daemon.py"
     assert path_basename("~/.grok/focus-audio/last_brief.md") == "last_brief.md"
     assert path_basename("plugins/focus-audio/focus_audio/brief.py") == "brief.py"
 
@@ -59,7 +59,7 @@ def test_clean_shortens_long_urls():
 
 def test_clean_collapses_absolute_paths():
     src = (
-        "Edited /Users/example/projects/plugins/focus-audio/focus_audio/brief.py "
+        "Edited /Users/example/projects/focus-audio/focus_audio/brief.py "
         "and ~/.grok/focus-audio/config.toml. Also plugins/focus-audio/README.md."
     )
     out = clean_for_audio(src, mode="brief")

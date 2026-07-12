@@ -17,7 +17,6 @@ Run this and report the JSON in one short line (`enabled`, `note`):
 ROOT="${GROK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.grok/plugins/focus-audio}}"
 BIN="$ROOT/bin/focus-audio"
 [ -x "$BIN" ] || BIN="$HOME/.grok/plugins/focus-audio/bin/focus-audio"
-[ -x "$BIN" ] || BIN="$HOME/.grok/plugins/focus-audio/bin/focus-audio"
 bash "$BIN" off
 ```
 

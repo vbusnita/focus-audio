@@ -15,7 +15,6 @@ Force re-synthesize the last Focus Audio brief. Run this and report the JSON res
 ROOT="${GROK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.grok/plugins/focus-audio}}"
 BIN="$ROOT/bin/focus-audio"
 [ -x "$BIN" ] || BIN="$HOME/.grok/plugins/focus-audio/bin/focus-audio"
-[ -x "$BIN" ] || BIN="$HOME/.grok/plugins/focus-audio/bin/focus-audio"
 bash "$BIN" ensure >/dev/null 2>&1 || true
 bash "$BIN" rebrief
 ```

@@ -43,7 +43,7 @@ MD_EMPHASIS_RE = re.compile(r"(\*\*|__|\*|_|~~)")
 MD_TABLE_BLOCK_RE = re.compile(
     r"(?m)^\|.+\|\s*\n\|[-:\s|]+\|\s*\n(?:\|.*\|\s*\n?)+",
 )
-# Infra agent routing + session attribution — never speak these.
+# Agent routing / attribution fences — never speak these.
 ROUTED_LINE_RE = re.compile(r"(?m)^[ \t]*Routed:\s*.+(?:\n|$)")
 # ```harness-signal ... ``` (closed) or unclosed to EOF (streaming chunks).
 HARNESS_SIGNAL_FENCE_RE = re.compile(

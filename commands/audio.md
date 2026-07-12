@@ -15,7 +15,6 @@ Show Focus Audio playback shortcuts and current daemon status. Run these shell c
 ROOT="${GROK_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$HOME/.grok/plugins/focus-audio}}"
 BIN="$ROOT/bin/focus-audio"
 if [ ! -x "$BIN" ]; then BIN="$HOME/.grok/plugins/focus-audio/bin/focus-audio"; fi
-if [ ! -x "$BIN" ]; then BIN="$HOME/.grok/plugins/focus-audio/bin/focus-audio"; fi
 
 echo "Focus Audio — playback controls"
 echo ""
