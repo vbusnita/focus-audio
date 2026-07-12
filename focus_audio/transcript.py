@@ -43,6 +43,25 @@ MD_EMPHASIS_RE = re.compile(r"(\*\*|__|\*|_|~~)")
 MD_TABLE_BLOCK_RE = re.compile(
     r"(?m)^\|.+\|\s*\n\|[-:\s|]+\|\s*\n(?:\|.*\|\s*\n?)+",
 )
+# Infra agent routing + session attribution — never speak these.
+ROUTED_LINE_RE = re.compile(r"(?m)^[ \t]*Routed:\s*.+(?:\n|$)")
+# ```harness-signal ... ``` (closed) or unclosed to EOF (streaming chunks).
+HARNESS_SIGNAL_FENCE_RE = re.compile(
+    r"```+\s*harness-signal\b[^\n]*\n[\s\S]*?(?:```+|(?=\Z))",
+    re.IGNORECASE,
+)
+# Bare JSON object containing harness_intent (agent forgot the fence).
+HARNESS_JSON_OBJ_RE = re.compile(
+    r"\{[^{}]*\"harness_intent\"[^{}]*\}",
+    re.DOTALL,
+)
+# Residual JSON field lines if a multi-chunk stream split the object.
+HARNESS_JSON_FIELD_LINE_RE = re.compile(
+    r"(?m)^[ \t]*\"(?:"
+    r"harness_intent|agent|packs_loaded|tool|attribution_source|"
+    r"deep_loaded|token_window|confidence"
+    r")\"\s*:\s*.+$"
+)
 
 
 @dataclass
@@ -260,6 +279,29 @@ def _cap_path_list_spam(text: str, max_names: int = 4) -> str:
     return list_re.sub(repl, text)
 
 
+def strip_harness_metadata(text: str) -> str:
+    """Drop agent routing / attribution harness signals from speakable text.
+
+    Strips ``Routed: …`` lines, ``harness-signal`` fences (closed or open to
+    EOF), bare ``harness_intent`` JSON objects, and residual field lines when
+    a live stream splits the object across chunks. Applied before other
+    cleaners so we never TTS \"code sample in harness-signal\".
+    """
+    if not text:
+        return ""
+    out = text
+    out = HARNESS_SIGNAL_FENCE_RE.sub("\n", out)
+    out = ROUTED_LINE_RE.sub("\n", out)
+    out = HARNESS_JSON_OBJ_RE.sub("\n", out)
+    out = HARNESS_JSON_FIELD_LINE_RE.sub("", out)
+    # Orphan fence *openers* only (partial stream). Do not strip bare ``` lines —
+    # those are normal code-fence closers and must stay for _replace_code_fences.
+    out = re.sub(r"(?m)^[ \t]*```+\s*harness-signal\b[^\n]*$", "", out, flags=re.I)
+    # Lone braces that only wrapped a stripped signal object.
+    out = re.sub(r"(?m)^[ \t]*[{}]\s*$", "", out)
+    return out
+
+
 def clean_for_audio(text: str, mode: str = "brief") -> str:
     """Local pre-filter so TTS and brief models hear speakable prose.
 
@@ -267,6 +309,9 @@ def clean_for_audio(text: str, mode: str = "brief") -> str:
     - brief: drop code bodies and tables aggressively (no line counts).
     - verbatim: keep short placeholders (\"code sample in python\") so structure
       survives without reading dumps.
+
+    Always strips infra harness routing metadata (Routed / harness-signal)
+    before other transforms so live and post-turn speech never read it aloud.
     """
     if not text:
         return ""
@@ -274,7 +319,7 @@ def clean_for_audio(text: str, mode: str = "brief") -> str:
     if use_mode not in ("brief", "verbatim"):
         use_mode = "brief"
 
-    cleaned = text
+    cleaned = strip_harness_metadata(text)
     cleaned = _replace_code_fences(cleaned, use_mode)
     cleaned = _collapse_markdown_tables(cleaned, use_mode)
     cleaned = _replace_urls(cleaned)

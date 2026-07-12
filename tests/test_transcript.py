@@ -18,6 +18,7 @@ from focus_audio.transcript import (  # noqa: E402
     find_session_dir,
     last_assistant_text,
     path_basename,
+    strip_harness_metadata,
 )
 
 
@@ -119,6 +120,85 @@ def test_clean_inline_code_paths():
     out = clean_for_audio("See `plugins/focus-audio/focus_audio/tts.py` next.", mode="brief")
     assert "tts.py" in out
     assert "plugins/" not in out
+
+
+_SAMPLE_HARNESS = """Routed: `focus_harness` → `network-ops` + `focus-harness`
+
+```harness-signal
+{
+  "harness_intent": "focus_harness",
+  "agent": "network-ops",
+  "packs_loaded": ["focus-harness"],
+  "tool": null,
+  "attribution_source": "router",
+  "deep_loaded": false,
+  "confidence": "high"
+}
+```
+
+We shipped the live CLI and stripped routing noise from speech.
+"""
+
+
+def test_strip_harness_metadata_removes_routed_and_fence():
+    out = strip_harness_metadata(_SAMPLE_HARNESS)
+    assert "Routed:" not in out
+    assert "harness-signal" not in out.lower()
+    assert "harness_intent" not in out
+    assert "packs_loaded" not in out
+    assert "attribution_source" not in out
+    assert "network-ops" not in out  # only appeared in routing metadata
+    assert "shipped the live CLI" in out
+
+
+def test_clean_for_audio_strips_harness_both_modes():
+    for mode in ("brief", "verbatim"):
+        out = clean_for_audio(_SAMPLE_HARNESS, mode=mode)
+        assert "Routed:" not in out
+        assert "harness_intent" not in out
+        assert "code sample" not in out.lower()  # must not become fence placeholder
+        assert "shipped the live CLI" in out
+
+
+def test_strip_unclosed_harness_fence_streaming():
+    """Live chunks may cut mid-fence before the closing ticks."""
+    partial = (
+        "Routed: `network_ops` → `network-ops` + `topology`\n\n"
+        "```harness-signal\n"
+        '{\n  "harness_intent": "network_ops",\n  "agent": "network-ops"\n'
+    )
+    out = strip_harness_metadata(partial)
+    assert "Routed:" not in out
+    assert "harness_intent" not in out
+    assert out.strip() == ""
+
+
+def test_strip_bare_harness_json_without_fence():
+    src = (
+        'Here is status.\n'
+        '{"harness_intent": "focus_harness", "agent": "network-ops", '
+        '"packs_loaded": ["focus-harness"], "attribution_source": "router"}\n'
+        "Then the real answer continues."
+    )
+    out = clean_for_audio(src, mode="verbatim")
+    assert "harness_intent" not in out
+    assert "real answer continues" in out
+
+
+def test_strip_residual_harness_json_field_lines():
+    """Second live chunk may be only field lines after the fence opener was stripped."""
+    chunk = (
+        '  "harness_intent": "focus_harness",\n'
+        '  "packs_loaded": ["focus-harness"],\n'
+        '  "attribution_source": "router",\n'
+        '  "confidence": "high"\n'
+        "}\n\n"
+        "Actual work: commit landed."
+    )
+    out = clean_for_audio(chunk, mode="verbatim")
+    assert "harness_intent" not in out
+    assert "packs_loaded" not in out
+    assert "commit landed" in out
 
 
 def test_extract_assistant_from_fixture(tmp_path: Path):

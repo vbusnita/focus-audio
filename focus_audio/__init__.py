@@ -1,3 +1,3 @@
 """Focus Audio — smart spoken briefs for Grok Build turns."""
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"

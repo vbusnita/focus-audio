@@ -8,8 +8,10 @@ Grok Build has voice **input**, not spoken agent replies. This plugin fills that
 
 - **Brief mode (default):** what happened → what changed → what to do next (~45–90s)
 - **Verbatim mode:** cleaned full reply, code dumps replaced with short placeholders
+- **Harness metadata silence:** never speaks `Routed: …` lines or `harness-signal` JSON (session attribution)
 - **Mode toggle re-speaks:** `Ctrl+Shift+M` announces the new mode, then re-synthesizes the last turn
 - Global **play / pause / restart / skip / rebrief / mode** controls
+- Master **on / off** (`/audio-on`, `/audio-off`) silences live + brief + verbatim
 - Content-hash **cache** so restart is free
 - **Fast start:** short replies skip the rewrite model; longer ones stream TTS in chunks
 - **Experimental live verbatim:** speak mid-turn chunks; with **`live_then_brief`** (default on) still play a post-turn brief after live finishes
@@ -256,6 +258,14 @@ Behavior:
 | `UserPromptSubmit` | `live-start` — tail from EOF, speak new `agent_message_chunk`s |
 | Mid-turn | Verbatim TTS per chunk (no brief rewrite model) |
 | `Stop` | If live already spoke ≥1 segment: with `live_then_brief` and `mode=brief`, wait for live then play brief; if `mode=verbatim`, skip post-turn (live already covered the reply) |
+
+**Speakable pre-pass** (live + end-of-turn) always drops infra routing noise before TTS:
+
+- Lines starting with `Routed:`
+- Fenced `harness-signal` blocks (closed or open/streaming)
+- Bare JSON objects / residual lines with `harness_intent`, `packs_loaded`, `attribution_source`, etc.
+
+So session attribution stays in the transcript but is never read aloud.
 
 Disable with `focus-audio config --live false`.  
 Post-live brief: `focus-audio config --live-then-brief true|false`.  
