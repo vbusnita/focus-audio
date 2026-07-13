@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -14,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 from focus_audio.transcript import (  # noqa: E402
     clean_for_audio,
     encode_cwd,
+    expand_for_speech,
     extract_assistant_contents,
     find_session_dir,
     last_assistant_text,
@@ -98,6 +100,10 @@ def test_clean_flattens_markdown_and_tables():
     assert "Fixed login" in out
     assert "Shipped" in out
     assert "table" not in out.lower()  # brief drops tables silently
+    # Headings and bullets become sentences (periods) for TTS pauses.
+    assert "Status." in out
+    assert "Fixed login." in out
+    assert "Shipped v1." in out or "Shipped" in out
 
 
 def test_clean_verbatim_table_placeholder():
@@ -120,6 +126,141 @@ def test_clean_inline_code_paths():
     out = clean_for_audio("See `plugins/focus-audio/focus_audio/tts.py` next.", mode="brief")
     assert "tts.py" in out
     assert "plugins/" not in out
+
+
+def test_clean_bullets_become_separate_sentences():
+    """List items must not collapse into one run-on TTS phrase."""
+    src = """Done:
+- path collapse
+- symbol expansion
+- harness silence
+
+Also:
+1. Restart daemon
+2. Run tests
+3. Commit when ready
+"""
+    out = clean_for_audio(src, mode="verbatim")
+    # Markers gone
+    assert re.search(r"(?m)^[-*+]\s", out) is None
+    assert re.search(r"(?m)^\d+\.\s", out) is None
+    # Each item is its own sentence (period) — survives newline→space collapse.
+    for phrase in (
+        "Path collapse.",
+        "Symbol expansion.",
+        "Harness silence.",
+        "Restart daemon.",
+        "Run tests.",
+        "Commit when ready.",
+    ):
+        assert phrase in out
+    # Whitespace-collapsed form (as TTS chunker does) still has sentence breaks.
+    collapsed = " ".join(out.split())
+    assert "Path collapse. Symbol expansion. Harness silence." in collapsed
+    assert "Restart daemon. Run tests. Commit when ready." in collapsed
+
+
+def test_clean_unicode_bullets_and_heading_sentence():
+    src = """## Next steps
+• first thing
+• second thing
+"""
+    out = clean_for_audio(src, mode="brief")
+    assert "Next steps." in out
+    assert "First thing." in out
+    assert "Second thing." in out
+    assert "•" not in out
+
+
+def test_clean_preserves_snake_case_as_words():
+    """Bare underscores must not glue identifiers (old MD_EMPHASIS bug)."""
+    out = clean_for_audio(
+        "Toggle live_verbatim and check skip_llm in focus_audio.",
+        mode="verbatim",
+    )
+    low = out.lower()
+    # Normalize trailing punctuation so "audio." still counts as audio.
+    tokens = [t.strip(".,;:!?") for t in low.split()]
+    # Old bug stripped "_" and produced one glued token.
+    assert "liveverbatim" not in tokens
+    assert "skipllm" not in tokens
+    assert "focusaudio" not in tokens
+    assert "live" in tokens and "verbatim" in tokens
+    assert "skip" in tokens and "llm" in tokens
+    assert "focus" in tokens and "audio" in tokens
+
+
+def test_expand_arrows_and_operators():
+    src = "Exit non-zero → retry; a == b and x != y; n <= 10; m >= 5; f => g"
+    out = expand_for_speech(src)
+    assert "→" not in out
+    assert "==" not in out
+    assert "!=" not in out
+    assert "<=" not in out
+    assert ">=" not in out
+    assert "=>" not in out
+    low = out.lower()
+    assert "to" in low
+    assert "equals" in low
+    assert "not equal" in low
+    assert "less than or equal" in low
+    assert "greater than or equal" in low
+    assert "then" in low
+
+
+def test_expand_key_chords():
+    out = expand_for_speech("Press Ctrl+Shift+M or Cmd+C then Ctrl+Shift+Space.")
+    low = out.lower()
+    assert "control" in low and "shift" in low
+    assert "command" in low
+    assert "space" in low
+    # Chord pluses should be gone (not "control plus shift").
+    assert "control+shift" not in low
+    assert "ctrl+shift" not in low
+
+
+def test_expand_status_kv_money_percent():
+    out = expand_for_speech(
+        "Status: enabled=true · mode=verbatim · cost $12 (50%) — done."
+    )
+    low = out.lower()
+    assert "enabled is true" in low
+    assert "mode is verbatim" in low
+    assert "·" not in out
+    assert "—" not in out
+    assert "12 dollars" in low
+    assert "50 percent" in low
+
+
+def test_clean_symbols_end_to_end_verbatim():
+    src = (
+        "Use Ctrl+Shift+R after failure.\n"
+        "Status: enabled=true · mode=verbatim\n"
+        "Compare a == b; if broken → retry.\n"
+        "See [docs](https://example.com/very/long/path/here) and **bold** live_verbatim."
+    )
+    out = clean_for_audio(src, mode="verbatim")
+    low = out.lower()
+    assert "→" not in out
+    assert "==" not in out
+    assert "·" not in out
+    assert "**" not in out
+    assert "https://" not in out
+    assert "](" not in out
+    assert "control shift" in low
+    assert "enabled is true" in low
+    assert "live verbatim" in low
+    assert "docs" in low
+    assert "equals" in low
+
+
+def test_expand_for_speech_idempotent_enough():
+    once = expand_for_speech("a == b → c & d")
+    twice = expand_for_speech(once)
+    assert "equals" in twice.lower()
+    assert "and" in twice.lower()
+    # Should not explode into doubled phrases on second pass.
+    assert twice.lower().count("equals") <= once.lower().count("equals") + 1
 
 
 _SAMPLE_HARNESS = """Routed: `focus_harness` → `network-ops` + `focus-harness`

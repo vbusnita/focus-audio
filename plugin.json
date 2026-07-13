@@ -1,6 +1,6 @@
 {
   "name": "focus-audio",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Smart focus audio for Grok Build \u2014 spoken focus briefs via your xAI key, live mid-turn speech, master on/off, global hotkeys, and /audio skills.",
   "author": {
     "name": "vbusnita"

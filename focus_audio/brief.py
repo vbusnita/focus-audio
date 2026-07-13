@@ -32,6 +32,8 @@ Hard rules:
 - Do not invent facts that are not in the source.
 - If there is no clear next step, set "next" to "Nothing you need to do next."
 - Keep each string plain prose suitable for text-to-speech.
+- Spell symbols as words: arrows as "to"/"from", "==" as "equals", "!=" as "is not equal to",
+  "&" as "and", "%" as "percent", key chords as "control shift M" (never leave raw glyphs).
 """
 
 VERBATIM_SYSTEM = """You prepare an AI coding-agent reply for text-to-speech Read Aloud.
@@ -42,8 +44,13 @@ Rules:
 - Use basenames only for files (daemon.py), never full paths or slash-spelling.
 - Drop any remaining agent routing metadata: "Routed:" lines, harness-signal blocks, and
   harness_intent / packs_loaded / attribution_source JSON — never read those aloud.
+- Spell symbols as words so TTS never stalls: →/=> as "to"/"then", == as "equals",
+  != as "is not equal to", & as "and", | as a pause, % as "percent",
+  Ctrl+Shift+M as "control shift M", snake_case as spaced words (live verbatim).
 - Keep important decisions and next steps.
-- Light TTS tags OK: [pause] between major sections. No markdown headings or bullets.
+- Light TTS tags OK: [pause] between major sections. No markdown headings or bullet glyphs.
+- If the source is a list, keep each item as its own short sentence ending with a period
+  (never run list items into one comma-joined phrase).
 - Do not invent new facts. Do not dramatically shorten unless the source is mostly code or tables.
 """
 

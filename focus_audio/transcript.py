@@ -36,13 +36,52 @@ LINE_REF_RE = re.compile(
     re.IGNORECASE,
 )
 INLINE_CODE_RE = re.compile(r"`([^`\n]+)`")
-MD_HEADING_RE = re.compile(r"(?m)^#{1,6}\s+")
-MD_BULLET_RE = re.compile(r"(?m)^[ \t]*(?:[-*+]|\d+\.)\s+")
-MD_EMPHASIS_RE = re.compile(r"(\*\*|__|\*|_|~~)")
+MD_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+# -, *, +, unicode bullets, or 1. / 1) ordered items.
+MD_LIST_ITEM_RE = re.compile(
+    r"^[ \t]*(?:[-*+•▪▸►‣∙]|\d{1,3}[.)])\s+(.+?)\s*$"
+)
+# Markdown links: [label](url) — keep label only (URL already often replaced).
+MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 # Pipe table: header row + separator + body rows.
 MD_TABLE_BLOCK_RE = re.compile(
     r"(?m)^\|.+\|\s*\n\|[-:\s|]+\|\s*\n(?:\|.*\|\s*\n?)+",
 )
+# Key chords: Ctrl+Shift+M, Cmd+C, Option+Space, …
+KEY_CHORD_RE = re.compile(
+    r"\b("
+    r"(?:Ctrl|Control|Cmd|Command|Alt|Option|Shift|Meta|Super|Win|Windows)"
+    r"(?:\s*\+\s*(?:Ctrl|Control|Cmd|Command|Alt|Option|Shift|Meta|Super|"
+    r"Win|Windows|Space|Tab|Enter|Return|Esc|Escape|Delete|Backspace|"
+    r"Up|Down|Left|Right|[A-Za-z0-9]|F\d{1,2}))+"
+    r")\b",
+    re.IGNORECASE,
+)
+_KEY_NAMES = {
+    "ctrl": "control",
+    "control": "control",
+    "cmd": "command",
+    "command": "command",
+    "alt": "alt",
+    "option": "option",
+    "shift": "shift",
+    "meta": "meta",
+    "super": "super",
+    "win": "windows",
+    "windows": "windows",
+    "esc": "escape",
+    "escape": "escape",
+    "enter": "enter",
+    "return": "return",
+    "tab": "tab",
+    "space": "space",
+    "delete": "delete",
+    "backspace": "backspace",
+    "up": "up",
+    "down": "down",
+    "left": "left",
+    "right": "right",
+}
 # Agent routing / attribution fences — never speak these.
 ROUTED_LINE_RE = re.compile(r"(?m)^[ \t]*Routed:\s*.+(?:\n|$)")
 # ```harness-signal ... ``` (closed) or unclosed to EOF (streaming chunks).
@@ -251,11 +290,206 @@ def _collapse_markdown_tables(text: str, mode: str) -> str:
     return MD_TABLE_BLOCK_RE.sub(placeholder, text)
 
 
+def _ensure_spoken_sentence(text: str) -> str:
+    """Make a list item / heading a real sentence so TTS can pause."""
+    t = " ".join((text or "").split()).strip()
+    if not t:
+        return ""
+    # Drop a trailing colon on list items ("Shipped:" → "Shipped.")
+    if len(t) > 1 and t.endswith(":") and not t.endswith("::"):
+        t = t[:-1].rstrip()
+    if not t:
+        return ""
+    if t[0].islower():
+        t = t[0].upper() + t[1:]
+    if t[-1] not in ".!?":
+        t += "."
+    return t
+
+
 def _flatten_markdown(text: str) -> str:
-    out = MD_HEADING_RE.sub("", text)
-    out = MD_BULLET_RE.sub("", out)
-    out = MD_EMPHASIS_RE.sub("", out)
+    """Strip markdown chrome and turn lists/headings into spoken sentences.
+
+    Bullet markers used to be deleted while leaving bare phrases on separate
+    lines. Downstream TTS chunking collapses newlines to spaces, so
+    ``- Fixed login\\n- Shipped v1`` became one run-on phrase. Each list item
+    and heading is now a terminal sentence (period) so prosody can pause.
+
+    Only *paired* emphasis markers are stripped — bare ``_`` in snake_case
+    must survive until ``expand_for_speech``.
+    """
+    if not text:
+        return ""
+
+    lines_out: List[str] = []
+    for raw_line in text.split("\n"):
+        line = raw_line.rstrip()
+        if not line.strip():
+            lines_out.append("")
+            continue
+
+        hm = MD_HEADING_RE.match(line)
+        if hm:
+            spoken = _ensure_spoken_sentence(hm.group(2))
+            if spoken:
+                lines_out.append(spoken)
+            continue
+
+        lm = MD_LIST_ITEM_RE.match(line)
+        if lm:
+            spoken = _ensure_spoken_sentence(lm.group(1))
+            if spoken:
+                lines_out.append(spoken)
+            continue
+
+        lines_out.append(line)
+
+    out = "\n".join(lines_out)
+    out = MD_LINK_RE.sub(r"\1", out)
+    # Paired emphasis only (non-greedy, single-line).
+    out = re.sub(r"\*\*(.+?)\*\*", r"\1", out)
+    out = re.sub(r"__(.+?)__", r"\1", out)
+    out = re.sub(r"~~(.+?)~~", r"\1", out)
+    # Single *italic* / _italic_ when not mid-token (protect snake_case / *glob*).
+    out = re.sub(r"(?<!\w)\*(?!\s)([^*\n]+?)(?<!\s)\*(?!\w)", r"\1", out)
+    out = re.sub(r"(?<!\w)_(?!\s)([^_\n]+?)(?<!\s)_(?!\w)", r"\1", out)
     return out
+
+
+def _speak_key_chord(match: re.Match) -> str:
+    raw = match.group(1)
+    parts = re.split(r"\s*\+\s*", raw)
+    spoken: List[str] = []
+    for part in parts:
+        key = part.strip()
+        if not key:
+            continue
+        low = key.lower()
+        if low in _KEY_NAMES:
+            spoken.append(_KEY_NAMES[low])
+        elif re.fullmatch(r"F\d{1,2}", key, re.I):
+            spoken.append(key.upper())
+        elif len(key) == 1:
+            spoken.append(key.upper())
+        else:
+            spoken.append(key)
+    return " ".join(spoken)
+
+
+def expand_for_speech(text: str) -> str:
+    """Rewrite symbols and tokens that TTS mangles into speakable prose.
+
+    Applied after structural cleaners (paths, fences, markdown) so both
+    brief and verbatim modes — including LLM-skip and live paths — hear
+    arrows, operators, key chords, and snake_case as words rather than
+    silence or glitches.
+    """
+    if not text:
+        return ""
+    out = text
+
+    # Keyboard chords before bare "+" handling.
+    out = KEY_CHORD_RE.sub(_speak_key_chord, out)
+
+    # Multi-char arrows / comparisons (order: longer tokens first).
+    multi = (
+        ("<=>", " is equivalent to "),
+        ("<->", " to "),
+        ("===", " is identical to "),
+        ("!==", " is not identical to "),
+        ("==", " equals "),
+        ("!=", " is not equal to "),
+        ("<>", " is not equal to "),
+        ("<=", " less than or equal to "),
+        (">=", " greater than or equal to "),
+        ("=>", " then "),
+        ("->", " to "),
+        ("<-", " from "),
+        ("±", " plus or minus "),
+        ("≠", " is not equal to "),
+        ("≤", " less than or equal to "),
+        ("≥", " greater than or equal to "),
+        ("≈", " approximately "),
+        ("→", " to "),
+        ("⇒", " then "),
+        ("⟶", " to "),
+        ("←", " from "),
+        ("⇐", " from "),
+        ("↔", " and "),
+        ("⇔", " if and only if "),
+        ("…", ", "),
+        ("...", ", "),
+    )
+    for src, dst in multi:
+        if src in out:
+            out = out.replace(src, dst)
+
+    # Key=value pairs common in status lines (enabled=true, mode=verbatim).
+    out = re.sub(
+        r"\b([A-Za-z][\w.-]{0,40})=(true|false|on|off|yes|no|null|none)\b",
+        r"\1 is \2",
+        out,
+        flags=re.IGNORECASE,
+    )
+    out = re.sub(
+        r"\b([A-Za-z][\w.-]{0,40})=([A-Za-z][\w.-]{0,40})\b",
+        r"\1 is \2",
+        out,
+    )
+
+    # Numbers with units / money / percent before stripping bare symbols.
+    out = re.sub(r"\$(\d+(?:\.\d+)?)\b", r"\1 dollars", out)
+    out = re.sub(r"\b(\d+(?:\.\d+)?)%", r"\1 percent", out)
+    out = re.sub(r"\b(\d+(?:\.\d+)?)x\b", r"\1 times", out, flags=re.IGNORECASE)
+
+    # @mentions and #tags (keep the token, drop the sigil as a spoken glyph).
+    out = re.sub(r"@([A-Za-z][\w.-]{0,40})", r"at \1", out)
+    out = re.sub(r"#([A-Za-z][\w.-]{0,40})", r"tag \1", out)
+
+    # Snake_case identifiers → spaced words (after path collapse).
+    out = re.sub(r"(?<=[A-Za-z0-9])_(?=[A-Za-z0-9])", " ", out)
+
+    # Slash between tokens (residual paths, and/or) — not :// in URLs.
+    out = re.sub(r"(?<=[\w.])/(?=[\w.])", " ", out)
+
+    # Spaced asterisk as multiply; drop leftover bare stars.
+    out = re.sub(r"\s\*\s", " times ", out)
+    out = out.replace("*", " ")
+
+    # Single-char symbols that often block or glitch TTS.
+    singles = (
+        ("·", ", "),
+        ("•", ", "),
+        ("—", ", "),
+        ("–", ", "),
+        ("―", ", "),
+        ("&", " and "),
+        ("@", " at "),
+        ("#", " number "),
+        ("~", " approximately "),
+        ("^", " "),
+        ("|", ", "),
+        ("\\", " "),
+        ("{", " "),
+        ("}", " "),
+        ("[", " "),
+        ("]", " "),
+        ("<", " less than "),
+        (">", " greater than "),
+        ("=", " equals "),
+        ("+", " plus "),
+    )
+    for src, dst in singles:
+        if src in out:
+            out = out.replace(src, dst)
+
+    # Collapse whitespace introduced by expansions; keep paragraph breaks.
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r" *\n *", "\n", out)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    out = re.sub(r" +([,.;:!?])", r"\1", out)
+    out = re.sub(r"([,.;:!?]){2,}", r"\1", out)
+    return out.strip()
 
 
 def _cap_path_list_spam(text: str, max_names: int = 4) -> str:
@@ -328,8 +562,10 @@ def clean_for_audio(text: str, mode: str = "brief") -> str:
     cleaned = _replace_paths(cleaned)
     cleaned = _flatten_markdown(cleaned)
     cleaned = _cap_path_list_spam(cleaned)
-    # Collapse leftover fence ticks and empty brackets noise
+    # Collapse leftover fence ticks before symbol expansion.
     cleaned = cleaned.replace("```", "")
+    # Symbols / operators / key chords → words (both brief and verbatim).
+    cleaned = expand_for_speech(cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     cleaned = re.sub(r" +([,.;:!?])", r"\1", cleaned)

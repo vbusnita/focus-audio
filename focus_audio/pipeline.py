@@ -14,7 +14,7 @@ from .cache import CacheEntry, entry_for, cache_key, lookup, write_meta
 from .config import Config
 from .paths import last_brief_path
 from .tts import concat_mp3, synthesize_speech
-from .transcript import clean_for_audio
+from .transcript import clean_for_audio, expand_for_speech
 
 
 @dataclass
@@ -84,6 +84,9 @@ def resolve_script(
             script = brief_mod.fallback_script(cleaned, max_words=2000 if skip_llm else 400)
         else:
             script = brief_mod.fallback_script(cleaned, max_words=cfg.max_brief_words)
+
+    # Polish residual symbols from LLM rewrites / fallbacks before TTS.
+    script = expand_for_speech(script)
 
     ent.script_path.parent.mkdir(parents=True, exist_ok=True)
     ent.script_path.write_text(script, encoding="utf-8")

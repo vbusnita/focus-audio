@@ -10,6 +10,7 @@ Grok Build has voice **input**, not spoken agent replies. This plugin fills that
 
 - **Brief mode (default):** what happened → what changed → what to do next (~45–90s)
 - **Verbatim mode:** cleaned full reply; code dumps become short placeholders
+- **Symbol-aware speech:** arrows, operators, key chords, snake_case, `$`/`%`, and status `key=value` become words (not TTS glitches)
 - **Live mid-turn speech (optional):** hear agent chunks while the turn is still running
 - **Mode toggle re-speaks:** `Ctrl+Shift+M` announces the new mode, then re-synthesizes the last turn
 - Global **play / pause / restart / skip / rebrief / mode** controls
@@ -210,7 +211,7 @@ live_then_brief = true
 focus-audio live on    # or /audio-live in Grok
 ```
 
-Tails `updates.jsonl` and speaks **agent message** chunks as Grok flushes them (not token-level streaming). The speakable pre-pass drops code dumps, long paths, and agent routing metadata (`Routed:`, `harness-signal`) so TTS stays listenable.
+Tails `updates.jsonl` and speaks **agent message** chunks as Grok flushes them (not token-level streaming). The speakable pre-pass drops code dumps, long paths, and agent routing metadata (`Routed:`, `harness-signal`), and expands symbols (→, ==, Ctrl+Shift+M, live_verbatim, …) into words so TTS stays listenable.
 
 ## Layout
 
