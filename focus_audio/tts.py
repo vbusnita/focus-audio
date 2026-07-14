@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 from .config import Config
+from .paths import secure_mkdir, secure_write_bytes
 
 MAX_CHARS = 14000  # stay under 15k API limit with headroom
 
@@ -73,8 +74,8 @@ def synthesize_speech(
     if not audio:
         raise RuntimeError("Empty TTS response")
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_bytes(audio)
+    secure_mkdir(out_path.parent)
+    secure_write_bytes(out_path, audio)
     return out_path
 
 
@@ -88,12 +89,13 @@ def concat_mp3(paths: Iterable[Path], out_path: Path) -> Path:
     if not parts:
         raise RuntimeError("No MP3 parts to concatenate")
     out_path = Path(out_path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    secure_mkdir(out_path.parent)
     if len(parts) == 1:
         data = parts[0].read_bytes()
-        out_path.write_bytes(data)
+        secure_write_bytes(out_path, data)
         return out_path
-    with out_path.open("wb") as out:
-        for p in parts:
-            out.write(p.read_bytes())
+    buf = bytearray()
+    for p in parts:
+        buf.extend(p.read_bytes())
+    secure_write_bytes(out_path, bytes(buf))
     return out_path

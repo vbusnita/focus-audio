@@ -25,9 +25,9 @@ Hard rules:
 - Never include code, diffs, tables, or placeholders like "code block" / "code sample" / "N lines of".
 - Never use full filesystem paths. Basenames only (e.g. daemon.py) or a short product name (Focus Audio).
 - Never spell out slashes or dots in paths (no "dot py", no "tilde slash").
-- Ignore any agent routing / attribution metadata if still present: lines starting with "Routed:",
-  harness-signal fences, JSON with harness_intent / packs_loaded / attribution_source. Do not
-  mention intents, packs, or agents from that block.
+- Ignore any leftover agent routing / attribution banners if still present (structured
+  "Routed:" lines, fenced routing JSON, intent/pack attribution objects). Do not mention
+  that bookkeeping aloud.
 - Prefer outcomes over exploration: what landed, what broke, what is next.
 - Do not invent facts that are not in the source.
 - If there is no clear next step, set "next" to "Nothing you need to do next."
@@ -42,8 +42,8 @@ Rules:
 - Output ONLY the spoken script. Preserve the author's meaning and order.
 - Remove or replace content that sounds terrible spoken: code samples become a short phrase like "code sample in Python" (never read bodies or line counts); long URLs become "link"; tables become a one-sentence summary.
 - Use basenames only for files (daemon.py), never full paths or slash-spelling.
-- Drop any remaining agent routing metadata: "Routed:" lines, harness-signal blocks, and
-  harness_intent / packs_loaded / attribution_source JSON — never read those aloud.
+- Drop any remaining agent routing banners (structured "Routed:" lines or routing JSON) —
+  never read that bookkeeping aloud.
 - Spell symbols as words so TTS never stalls: →/=> as "to"/"then", == as "equals",
   != as "is not equal to", & as "and", | as a pause, % as "percent",
   Ctrl+Shift+M as "control shift M", snake_case as spaced words (live verbatim).

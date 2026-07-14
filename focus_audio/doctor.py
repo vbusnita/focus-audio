@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from . import __version__
 from .config import ensure_default_config
 from .ipc import is_daemon_alive, try_send
-from .paths import config_path, data_dir, sessions_root, socket_path
+from .paths import check_runtime_perms, config_path, data_dir, sessions_root, socket_path
 
 
 @dataclass
@@ -232,12 +232,16 @@ def _check_hotkeys() -> Check:
 
 
 def _check_data_dir() -> Check:
+    from .paths import secure_write_text
+
     d = data_dir()
+    probe = d / ".doctor_write_probe"
     try:
-        d.mkdir(parents=True, exist_ok=True)
-        probe = d / ".doctor_write_probe"
-        probe.write_text("ok", encoding="utf-8")
-        probe.unlink(missing_ok=True)
+        secure_write_text(probe, "ok")
+        try:
+            probe.unlink()
+        except OSError:
+            pass
     except OSError as e:
         return Check(
             id="data_dir",
@@ -254,6 +258,17 @@ def _check_data_dir() -> Check:
     )
 
 
+def _check_runtime_perms() -> Check:
+    info = check_runtime_perms()
+    return Check(
+        id="runtime_perms",
+        ok=bool(info["ok"]),
+        level=str(info["level"]),
+        detail=str(info["detail"]),
+        fix=info.get("fix") if isinstance(info.get("fix"), str) else None,
+    )
+
+
 def run_doctor(*, plugin_root: Optional[Path] = None) -> DoctorReport:
     root = plugin_root or Path(__file__).resolve().parent.parent
     checks = [
@@ -261,6 +276,7 @@ def run_doctor(*, plugin_root: Optional[Path] = None) -> DoctorReport:
         _check_platform(),
         _check_plugin_layout(root),
         _check_data_dir(),
+        _check_runtime_perms(),
         _check_api_key(),
         _check_config(),
         _check_sessions_dir(),

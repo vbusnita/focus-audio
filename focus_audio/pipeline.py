@@ -12,7 +12,8 @@ from typing import Callable, List, Optional
 from . import brief as brief_mod
 from .cache import CacheEntry, entry_for, cache_key, lookup, write_meta
 from .config import Config
-from .paths import last_brief_path
+from .paths import last_brief_path, secure_mkdir, secure_write_text
+from .redact import redact_secrets
 from .tts import concat_mp3, synthesize_speech
 from .transcript import clean_for_audio, expand_for_speech
 
@@ -52,6 +53,8 @@ def resolve_script(
     """Clean source, hit cache or produce spoken script (no TTS yet)."""
     use_mode = (mode or cfg.mode or "brief").lower()
     cleaned = source_text if already_cleaned else clean_for_audio(source_text, use_mode)
+    # Best-effort credential scrub before any network call or disk cache key.
+    cleaned = redact_secrets(cleaned)
     # Live mode uses a distinct cache namespace so post-turn briefs stay separate.
     cache_mode = f"{use_mode}+live" if skip_llm and use_mode == "verbatim" else use_mode
 
@@ -87,9 +90,11 @@ def resolve_script(
 
     # Polish residual symbols from LLM rewrites / fallbacks before TTS.
     script = expand_for_speech(script)
+    # Second pass: LLM may re-echo a key fragment into the spoken script.
+    script = redact_secrets(script)
 
-    ent.script_path.parent.mkdir(parents=True, exist_ok=True)
-    ent.script_path.write_text(script, encoding="utf-8")
+    secure_mkdir(ent.script_path.parent)
+    secure_write_text(ent.script_path, script)
     _write_last_brief(script, cache_mode, from_cache=False)
     return ScriptReady(
         entry=ent,
@@ -359,7 +364,7 @@ def _cleanup_parts(parts: List[Path], keep: Path) -> None:
 def _write_last_brief(script: str, mode: str, from_cache: bool) -> None:
     path = last_brief_path()
     header = f"# Focus Audio last brief\n\nmode: `{mode}` · cache: `{from_cache}`\n\n---\n\n"
-    path.write_text(header + script + "\n", encoding="utf-8")
+    secure_write_text(path, header + script + "\n")
 
 
 def prepare_from_session(

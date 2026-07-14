@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .paths import config_path
+from .paths import config_path, secure_write_text
 
 
 DEFAULTS: Dict[str, Any] = {
@@ -163,8 +163,7 @@ def load_config(path: Optional[Path] = None) -> Config:
 
 def save_config(cfg: Config, path: Optional[Path] = None) -> Path:
     p = path or config_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(_dump_toml_flat(asdict(cfg)), encoding="utf-8")
+    secure_write_text(p, _dump_toml_flat(asdict(cfg)))
     return p
 
 

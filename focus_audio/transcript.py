@@ -82,7 +82,9 @@ _KEY_NAMES = {
     "left": "left",
     "right": "right",
 }
-# Agent routing / attribution fences — never speak these.
+# Agent routing / attribution banners — strip before TTS when present.
+# Patterns match common "Routed:" lines and fenced/bare routing JSON; no-ops
+# for agents that never emit them.
 ROUTED_LINE_RE = re.compile(r"(?m)^[ \t]*Routed:\s*.+(?:\n|$)")
 # ```harness-signal ... ``` (closed) or unclosed to EOF (streaming chunks).
 HARNESS_SIGNAL_FENCE_RE = re.compile(
@@ -514,12 +516,13 @@ def _cap_path_list_spam(text: str, max_names: int = 4) -> str:
 
 
 def strip_harness_metadata(text: str) -> str:
-    """Drop agent routing / attribution harness signals from speakable text.
+    """Drop agent routing / attribution banners from speakable text when present.
 
-    Strips ``Routed: …`` lines, ``harness-signal`` fences (closed or open to
-    EOF), bare ``harness_intent`` JSON objects, and residual field lines when
-    a live stream splits the object across chunks. Applied before other
-    cleaners so we never TTS \"code sample in harness-signal\".
+    Implementation detail: strips common ``Routed: …`` lines, fenced routing
+    JSON blocks, bare ``harness_intent`` objects, and residual field lines from
+    split streams. Safe no-op for agents that never emit those patterns — most
+    users never notice this path. Applied before other cleaners so we never
+    TTS a placeholder about the routing fence itself.
     """
     if not text:
         return ""
@@ -544,8 +547,8 @@ def clean_for_audio(text: str, mode: str = "brief") -> str:
     - verbatim: keep short placeholders (\"code sample in python\") so structure
       survives without reading dumps.
 
-    Always strips infra harness routing metadata (Routed / harness-signal)
-    before other transforms so live and post-turn speech never read it aloud.
+    Always strips agent routing banners when present (before other transforms)
+    so live and post-turn speech do not read that bookkeeping aloud.
     """
     if not text:
         return ""
