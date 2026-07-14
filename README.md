@@ -278,6 +278,12 @@ Tails `updates.jsonl` and speaks **agent message** chunks as Grok flushes them (
 
 ```bash
 python3 -m pytest tests/ -q
+
+# Privacy / hardening smoke (isolated temp GROK_HOME — safe default)
+./scripts/test_plan_manual.sh
+
+# Also chmod + restart the real ~/.grok/focus-audio daemon (no purge)
+./scripts/test_plan_manual.sh --real
 ```
 
 ## License
