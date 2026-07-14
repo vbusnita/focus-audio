@@ -2,7 +2,7 @@
 
 **Listen to your coding agent instead of reading every wall of text.**
 
-Focus Audio is a plugin for [Grok Build](https://x.ai) (macOS). When the agent finishes a turn—or while it is still writing, if you turn that on—it speaks a short summary (or a cleaned full read) using **your own** [xAI](https://console.x.ai/) API key. Nothing is billed through this project; you pay xAI the same way you would for any other API use.
+Focus Audio is a plugin for [Grok Build](https://docs.x.ai/build/overview) (macOS). When the agent finishes a turn—or while it is still writing, if you turn that on—it speaks a short summary (or a cleaned full read) using **your own** [xAI API key](https://console.x.ai/team/default/api-keys). Nothing is billed through this project; you pay xAI the same way you would for any other API use.
 
 If you already use Grok in the terminal and want to keep working with your ears free, this is for you. If you only want a general “read this page aloud” button, this is probably more than you need.
 
@@ -25,11 +25,29 @@ Audio problems never block Grok. If Focus Audio fails, coding continues.
 ## What you need
 
 1. **macOS** (primary platform today)
-2. **[Grok Build](https://x.ai)** installed and working
+2. **[Grok Build](https://docs.x.ai/build/overview)** installed and working ([product page](https://x.ai))
 3. **Python 3.9+** (`python3` on your PATH)
-4. An **[xAI API key](https://console.x.ai/)** with API access, a positive credit balance, and **text-to-speech (TTS)** available on that key
+4. An **xAI account** with an [API key](https://console.x.ai/team/default/api-keys) (see [Quickstart](https://docs.x.ai/developers/quickstart)), a positive balance in the [Cloud Console](https://console.x.ai/), and access to [Text to Speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech)
 
-> Tip: `focus-audio doctor` can look fine while speech fails if the key is set but credits are empty or TTS is not enabled. Check the [xAI console](https://console.x.ai/) if you hear nothing.
+> Tip: `focus-audio doctor` can look fine while speech fails if the key is set but credits are empty or TTS is not enabled for your account. Check the [console](https://console.x.ai/) and the [TTS docs](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech) if you hear nothing.
+
+### Official xAI docs (handy bookmarks)
+
+| Topic | Link |
+|-------|------|
+| Get started (account + first API call) | [Quickstart](https://docs.x.ai/developers/quickstart) |
+| Create / manage API keys | [API Keys in Console](https://console.x.ai/team/default/api-keys) |
+| Grok Build (the coding agent this plugin attaches to) | [Grok Build overview](https://docs.x.ai/build/overview) |
+| Cloud Console (keys, usage, models) | [console.x.ai](https://console.x.ai/) |
+| Text to Speech (what Focus Audio uses for audio) | [TTS guide](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech) |
+| Voice overview (TTS, STT, realtime) | [Voice APIs](https://docs.x.ai/developers/model-capabilities/audio/voice) |
+| Text generation / chat (used for brief rewrite) | [Generate text](https://docs.x.ai/developers/model-capabilities/text/generate-text) |
+| REST API reference | [Inference API](https://docs.x.ai/developers/rest-api-reference/inference) |
+| Pricing (including voice) | [Pricing](https://docs.x.ai/developers/pricing) |
+| TTS playground (try voices in the browser) | [Console TTS playground](https://console.x.ai/team/default/voice/text-to-speech) |
+| Docs home | [docs.x.ai](https://docs.x.ai/docs/overview) |
+
+Focus Audio’s defaults point at `https://api.x.ai/v1` ([chat completions](https://docs.x.ai/developers/model-capabilities/text/generate-text) + [`/v1/tts`](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech)). If a link moves, start from the [docs overview](https://docs.x.ai/docs/overview) or [Quickstart](https://docs.x.ai/developers/quickstart).
 
 ---
 
@@ -56,7 +74,7 @@ ln -sf "$(pwd)/bin/focus-audio" ~/.local/bin/focus-audio
 
 ### 2. Add your xAI API key
 
-Focus Audio **never** saves the key into its own config file, cache, or logs.
+Create a key on the [API Keys page](https://console.x.ai/team/default/api-keys) (walkthrough: [Quickstart → Generate an API key](https://docs.x.ai/developers/quickstart#step-2-generate-an-api-key)). Focus Audio **never** saves the key into its own config file, cache, or logs.
 
 **Recommended (macOS Keychain):**
 
@@ -171,10 +189,10 @@ focus-audio config --show
 
 **What costs money?** Roughly:
 
-- Sometimes a **chat** call to rewrite a short brief (skipped when the cleaned text is already short)
-- A **TTS** call to turn text into audio (including live chunks)
+- Sometimes a **[text generation / chat](https://docs.x.ai/developers/model-capabilities/text/generate-text)** call to rewrite a short brief (skipped when the cleaned text is already short)
+- A **[text-to-speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech)** call to turn text into audio (including live chunks)
 
-Restarting the **same** clip from cache does not call the API again. Prices and free tiers change; use the [xAI console](https://console.x.ai/) for current numbers.
+Restarting the **same** clip from cache does not call the API again. Prices and free tiers change; see [xAI pricing](https://docs.x.ai/developers/pricing) and your usage in the [console](https://console.x.ai/).
 
 ---
 
@@ -189,7 +207,7 @@ Focus Audio runs on **your Mac**. It does **not** send data to the Focus Audio a
 | Chat (for briefs) | Cleaned text of the agent’s reply (up to about 12k characters; often skipped for short replies) |
 | Text-to-speech | The spoken script (up to about 14k characters), including live mid-turn chunks if live is on |
 
-Traffic goes to your configured API base (default `https://api.x.ai/v1`) over HTTPS.
+Traffic goes to your configured API base (default `https://api.x.ai/v1`) over HTTPS. Endpoints and behavior are defined by xAI’s [inference REST reference](https://docs.x.ai/developers/rest-api-reference/inference) and [TTS docs](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech).
 
 ### What stays only on your Mac
 
