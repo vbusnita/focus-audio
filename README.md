@@ -286,6 +286,8 @@ python3 -m pytest tests/ -q
 ./scripts/test_plan_manual.sh --real
 ```
 
+`pytest` covers library logic. The shell plan drives the real CLI (permissions, purge, daemon socket, kill-switches) under a temporary `GROK_HOME` so clones and PR reviews do not wipe a live speech cache. Full walkthrough, flags, and what each step means: **[scripts/test_plan_manual.md](scripts/test_plan_manual.md)**.
+
 ## License
 
 [MIT](LICENSE) — use it, fork it, ship it. Bring **your** API key.
