@@ -23,6 +23,7 @@ Include a clear description, impact, and steps to reproduce if possible. We’ll
 - Focus Audio is a **local Grok Build plugin**. It talks to the **xAI API using the user’s own credentials**.
 - API keys are resolved from the user’s **macOS Keychain** or environment; they must **never** be committed to git or written into `~/.grok/focus-audio/config.toml`.
 - Runtime data (config, cache, sockets, logs) lives under **`~/.grok/focus-audio/`** on the user’s machine — not in this repository.
+- **Privacy model:** cleaned agent text (and spoken scripts) may be sent to xAI chat/TTS under the user’s key; speech cache on disk may retain conversation content. See README → **Privacy**. Hardening helpers: `focus-audio purge`, `focus-audio harden`, owner-only data-dir modes, and best-effort secret redaction before API calls.
 
 ## Scope notes
 

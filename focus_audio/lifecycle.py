@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-from .paths import data_dir
+from .paths import data_dir, secure_chmod_file, secure_mkdir, secure_write_text
 
 
 def refs_path() -> Path:
@@ -41,20 +41,22 @@ def _read_unlocked(path: Path) -> dict:
 
 
 def _write_unlocked(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    secure_mkdir(path.parent)
     tmp = path.with_suffix(".tmp")
     data = dict(data)
     data["updated_at"] = time.time()
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    secure_write_text(tmp, json.dumps(data, indent=2) + "\n")
     tmp.replace(path)
+    secure_chmod_file(path)
 
 
 def _with_lock(fn: Callable[[dict], dict]) -> Tuple[dict, dict]:
     """Run fn(state) under exclusive lock; returns (result, state)."""
     path = refs_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
+    secure_mkdir(path.parent)
     lock_path = path.with_suffix(".lock")
     with lock_path.open("a+", encoding="utf-8") as lockf:
+        secure_chmod_file(lock_path)
         fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
         try:
             state = _read_unlocked(path)

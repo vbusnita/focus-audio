@@ -17,7 +17,15 @@ from typing import Any, Dict, List, Optional
 from .config import Config, ensure_default_config, load_config, save_config
 from .ipc import is_daemon_alive
 from .live import LiveSegment, LiveSegmentQueue, produce_live_segments
-from .paths import data_dir, last_brief_path, last_job_path, pid_path, socket_path
+from .paths import (
+    data_dir,
+    harden_socket,
+    last_brief_path,
+    last_job_path,
+    pid_path,
+    secure_write_text,
+    socket_path,
+)
 from .pipeline import (
     PreparedAudio,
     resolve_from_session,
@@ -406,7 +414,8 @@ class FocusAudioDaemon:
                     # never drop below spoken.
                     self._live_segments = max(self._live_segments, spoken)
                     self._last_prepared = prepared
-                    last_job_path().write_text(
+                    secure_write_text(
+                        last_job_path(),
                         json.dumps(
                             {
                                 "mode": "live_verbatim",
@@ -419,7 +428,6 @@ class FocusAudioDaemon:
                             },
                             indent=2,
                         ),
-                        encoding="utf-8",
                     )
 
             if scripts:
@@ -428,8 +436,9 @@ class FocusAudioDaemon:
                         f"# Focus Audio last brief\n\nmode: `live_verbatim` · "
                         f"segments: `{len(scripts)}`\n\n---\n\n"
                     )
-                    last_brief_path().write_text(
-                        header + "\n\n".join(scripts) + "\n", encoding="utf-8"
+                    secure_write_text(
+                        last_brief_path(),
+                        header + "\n\n".join(scripts) + "\n",
                     )
                 except OSError:
                     pass
@@ -578,7 +587,8 @@ class FocusAudioDaemon:
                 brief_skipped=ready.brief_skipped,
                 brief_fallback=ready.brief_fallback,
             )
-            last_job_path().write_text(
+            secure_write_text(
+                last_job_path(),
                 json.dumps(
                     {
                         "mode": ready.mode,
@@ -590,7 +600,6 @@ class FocusAudioDaemon:
                     },
                     indent=2,
                 ),
-                encoding="utf-8",
             )
 
         def still() -> bool:
@@ -611,7 +620,8 @@ class FocusAudioDaemon:
             if gen != self._job_gen:
                 return
             self._last_prepared = prepared
-            last_job_path().write_text(
+            secure_write_text(
+                last_job_path(),
                 json.dumps(
                     {
                         "mode": prepared.mode,
@@ -623,7 +633,6 @@ class FocusAudioDaemon:
                     },
                     indent=2,
                 ),
-                encoding="utf-8",
             )
             if self._status == "playing":
                 self._status = "idle"
@@ -956,12 +965,14 @@ class FocusAudioDaemon:
 
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(str(sock_path))
+        # Owner-only socket — other local users must not command the daemon.
+        harden_socket(sock_path)
         server.listen(8)
         server.settimeout(0.5)
         self._server = server
         # Keep lock_fd referenced so flock is held for process lifetime.
         self._lock_fd = lock_fd  # type: ignore[attr-defined]
-        pid_path().write_text(str(os.getpid()), encoding="utf-8")
+        secure_write_text(pid_path(), str(os.getpid()))
         print(f"Focus Audio daemon listening on {sock_path}", flush=True)
 
         def _sig(_signum, _frame):

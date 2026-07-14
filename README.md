@@ -97,6 +97,57 @@ focus-audio config --show
 # → api_key_source: keychain:… or env:XAI_API_KEY
 ```
 
+## Privacy
+
+Focus Audio is **local-first**, but it is not “offline.” Before you leave it on for every session, understand what leaves your machine and what stays on disk.
+
+### What is sent to xAI (your account)
+
+Using **your** key, Focus Audio may call:
+
+| Call | Payload |
+|------|---------|
+| **Chat** (`/chat/completions`) | Cleaned assistant-turn text (up to ~12k chars) when producing a **brief** (often skipped for short replies) |
+| **TTS** (`/tts`) | The spoken script (up to ~14k chars), including **live** mid-turn chunks |
+
+There is **no shared Focus Audio cloud**, no analytics endpoint, and no third-party telemetry in this plugin. Network traffic is outbound HTTPS to the configured `api_base` (default `https://api.x.ai/v1`).
+
+### What is *not* fully redacted
+
+Speakable cleaning drops code fences, long paths, and agent routing metadata. A best-effort **secret scrubber** redacts common key shapes (`xai-…`, `sk-…`, GitHub tokens, PEM private keys, `Bearer …`, `api_key=…`) before chat/TTS and before writing cache.
+
+That is a **safety net, not a guarantee**. Free-form secrets, customer data, or internal prose in an agent reply can still be summarized or spoken and therefore sent to xAI. Prefer:
+
+- `mode = "brief"` over live + verbatim for less raw content
+- `live_verbatim = false` unless you need mid-turn speech
+- `FOCUS_AUDIO=0` or `focus-audio off` on sensitive sessions
+
+### What stays on disk (local)
+
+Under `~/.grok/focus-audio/` (owner-only `700` / files `600` by default):
+
+| Path | Contents |
+|------|----------|
+| `cache/*.txt` + `*.mp3` | Spoken scripts and audio (content-hash cache) |
+| `last_brief.md` | Latest script |
+| `hook.log` / `daemon.log` | Session IDs, workspace paths, hook metadata — **not** API keys |
+| `config.toml` | Settings only (no secrets) |
+| `daemon.sock` | Local Unix IPC (owner-only `600`) |
+
+Anyone with your macOS user account (or malware running as you) can read that cache. It is **not** in the git repo.
+
+### Controls
+
+```bash
+focus-audio off                 # master silence (persisted)
+export FOCUS_AUDIO=0            # process kill-switch
+focus-audio purge --yes         # delete speech cache
+focus-audio purge --all --yes   # cache + logs + last brief/job
+focus-audio harden              # re-apply owner-only perms on the data dir
+```
+
+`purge` never deletes `config.toml` or Keychain / env credentials.
+
 ## Cost
 
 Focus Audio uses **your** [xAI API](https://console.x.ai/) account only. There is no shared key and no billing on our behalf.
@@ -133,7 +184,7 @@ In the Grok TUI: `/hooks` → confirm **focus-audio** hooks are listed. You may 
 
 | Command | Purpose |
 |---------|---------|
-| `focus-audio doctor` | Install + key + daemon health check |
+| `focus-audio doctor` | Install + key + daemon + perms health check |
 | `focus-audio ensure` | SessionStart — start daemon + register session |
 | `focus-audio release` | SessionEnd — drop ref; stop if last session |
 | `focus-audio speak -` | Speak stdin as brief |
@@ -145,6 +196,8 @@ In the Grok TUI: `/hooks` → confirm **focus-audio** hooks are listed. You may 
 | `focus-audio rebrief` | Force regenerate last job |
 | `focus-audio status` | Daemon + lifecycle refs |
 | `focus-audio config` | Show/edit `~/.grok/focus-audio/config.toml` |
+| `focus-audio purge [--all] --yes` | Delete local speech cache / logs (not config or keys) |
+| `focus-audio harden` | Owner-only perms on `~/.grok/focus-audio` |
 | `focus-audio shutdown [--clear-refs]` | Stop daemon |
 
 In Grok Build, the **Stop** hook enqueues automatically. Manual: **`/listen`**.

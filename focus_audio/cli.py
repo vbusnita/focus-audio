@@ -15,7 +15,15 @@ from . import __version__
 from .config import ensure_default_config, load_config, save_config
 from .ipc import is_daemon_alive, send_command, try_send
 from .lifecycle import acquire_session, active_count, clear_all, list_sessions, release_session
-from .paths import config_path, data_dir, last_brief_path, socket_path
+from .paths import (
+    config_path,
+    data_dir,
+    harden_runtime_tree,
+    last_brief_path,
+    purge_runtime,
+    secure_open_append,
+    socket_path,
+)
 from .pipeline import prepare_audio, prepare_from_session
 from .player import Player
 from .transcript import load_turn
@@ -80,8 +88,7 @@ def _hook_log(msg: str) -> None:
     """Append a line to ~/.grok/focus-audio/hook.log (best-effort)."""
     try:
         path = data_dir() / "hook.log"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as fh:
+        with secure_open_append(path) as fh:
             fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {msg}\n")
     except OSError:
         pass
@@ -129,8 +136,7 @@ def _ensure_daemon() -> bool:
         os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
     )
     log = data_dir() / "daemon.log"
-    data_dir().mkdir(parents=True, exist_ok=True)
-    with log.open("a", encoding="utf-8") as fh:
+    with secure_open_append(log) as fh:
         fh.write(f"\n--- spawn {time.strftime('%Y-%m-%d %H:%M:%S')} ---\n")
         fh.flush()
         subprocess.Popen(
@@ -671,6 +677,57 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0 if report.ok else 1
 
 
+def cmd_purge(args: argparse.Namespace) -> int:
+    """Delete local cache / logs / last-brief (never touches config or API keys)."""
+    if args.all:
+        do_cache, do_logs, do_last = True, True, True
+    elif args.cache or args.logs or args.last:
+        do_cache, do_logs, do_last = bool(args.cache), bool(args.logs), bool(args.last)
+    else:
+        # Default: speech cache only
+        do_cache, do_logs, do_last = True, False, False
+
+    targets = []
+    if do_cache:
+        targets.append("cache")
+    if do_logs:
+        targets.append("logs")
+    if do_last:
+        targets.append("last brief/job")
+    summary = ", ".join(targets) or "nothing"
+    if not getattr(args, "yes", False):
+        print(f"Will purge from {data_dir()}: {summary}")
+        print("Pass --yes to confirm (config.toml and API keys are never deleted).")
+        return 2
+
+    result = purge_runtime(cache=do_cache, logs=do_logs, last=do_last)
+    if getattr(args, "json", False):
+        print(json.dumps(result, indent=2))
+    else:
+        print(f"purged {result['removed_count']} item(s) under {result['data_dir']}")
+        for err in result.get("errors") or []:
+            print(f"  warn: {err}", file=sys.stderr)
+    return 1 if result.get("errors") else 0
+
+
+def cmd_harden(args: argparse.Namespace) -> int:
+    """chmod runtime data dir 700 and files 600 (best-effort)."""
+    stats = harden_runtime_tree()
+    # Restarting the daemon re-applies socket 600; optional nudge.
+    if is_daemon_alive() and not getattr(args, "no_reload", False):
+        try_send({"cmd": "reload_config"}, timeout=1.0)
+    if getattr(args, "json", False):
+        print(json.dumps({"ok": True, **stats, "data_dir": str(data_dir())}, indent=2))
+    else:
+        print(
+            f"hardened {data_dir()}: {stats['dirs']} dir(s), {stats['files']} file(s) "
+            f"(dirs 700, files 600)"
+        )
+        print("Restart the daemon to re-bind the socket with mode 600 if needed:")
+        print("  focus-audio shutdown && focus-audio ensure -v")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="focus-audio",
@@ -831,6 +888,51 @@ def build_parser() -> argparse.ArgumentParser:
         help="Machine-readable report",
     )
     doc.set_defaults(func=cmd_doctor)
+
+    pur = sub.add_parser(
+        "purge",
+        help="Delete local speech cache / logs / last brief (never config or API keys)",
+    )
+    pur.add_argument(
+        "--cache",
+        action="store_true",
+        help="Delete ~/.grok/focus-audio/cache/* (default if no other target flags)",
+    )
+    pur.add_argument(
+        "--logs",
+        action="store_true",
+        help="Delete hook.log and daemon.log",
+    )
+    pur.add_argument(
+        "--last",
+        action="store_true",
+        help="Delete last_brief.md and last_job.json",
+    )
+    pur.add_argument(
+        "--all",
+        action="store_true",
+        help="Cache + logs + last brief/job",
+    )
+    pur.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        help="Confirm deletion (required)",
+    )
+    pur.add_argument("--json", action="store_true", help="Machine-readable result")
+    pur.set_defaults(func=cmd_purge)
+
+    hd = sub.add_parser(
+        "harden",
+        help="Set owner-only permissions on ~/.grok/focus-audio (dirs 700, files 600)",
+    )
+    hd.add_argument("--json", action="store_true")
+    hd.add_argument(
+        "--no-reload",
+        action="store_true",
+        help="Do not nudge a running daemon",
+    )
+    hd.set_defaults(func=cmd_harden)
 
     return p
 

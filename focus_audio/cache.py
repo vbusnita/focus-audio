@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
-from .paths import cache_dir
+from .paths import cache_dir, secure_write_text
 
 
 @dataclass
@@ -79,7 +79,7 @@ def write_meta(ent: CacheEntry, extra: Optional[dict] = None) -> None:
     if extra:
         meta.update(extra)
     path = cache_dir() / f"{ent.key}.json"
-    path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    secure_write_text(path, json.dumps(meta, indent=2))
 
 
 def read_script(ent: CacheEntry) -> str:
