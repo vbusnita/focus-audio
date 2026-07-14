@@ -16,7 +16,7 @@ Grok Build has voice **input**, not spoken agent replies. This plugin fills that
 - Global **play / pause / restart / skip / rebrief / mode** controls
 - Master **on / off** (`/audio-on`, `/audio-off`)
 - Content-hash **cache** so restart is free
-- **Harness noise silence:** never speaks agent `Routed:` lines or `harness-signal` JSON blocks
+- **Routing-banner silence:** if an agent prefixes a reply with routing/attribution noise (structured banners or JSON), that is stripped before speech — no setup required
 - Hooks are **fail-open** — audio never blocks coding
 
 ## Install
@@ -114,7 +114,7 @@ There is **no shared Focus Audio cloud**, no analytics endpoint, and no third-pa
 
 ### What is *not* fully redacted
 
-Speakable cleaning drops code fences, long paths, and agent routing metadata. A best-effort **secret scrubber** redacts common key shapes (`xai-…`, `sk-…`, GitHub tokens, PEM private keys, `Bearer …`, `api_key=…`) before chat/TTS and before writing cache.
+Speakable cleaning drops code fences, long paths, and common agent routing banners when present. A best-effort **secret scrubber** redacts common key shapes (`xai-…`, `sk-…`, GitHub tokens, PEM private keys, `Bearer …`, `api_key=…`) before chat/TTS and before writing cache.
 
 That is a **safety net, not a guarantee**. Free-form secrets, customer data, or internal prose in an agent reply can still be summarized or spoken and therefore sent to xAI. Prefer:
 
@@ -264,7 +264,7 @@ live_then_brief = true
 focus-audio live on    # or /audio-live in Grok
 ```
 
-Tails `updates.jsonl` and speaks **agent message** chunks as Grok flushes them (not token-level streaming). The speakable pre-pass drops code dumps, long paths, and agent routing metadata (`Routed:`, `harness-signal`), and expands symbols (→, ==, Ctrl+Shift+M, live_verbatim, …) into words so TTS stays listenable.
+Tails `updates.jsonl` and speaks **agent message** chunks as Grok flushes them (not token-level streaming). The speakable pre-pass drops code dumps, long paths, and agent routing banners when present, and expands symbols (→, ==, Ctrl+Shift+M, live_verbatim, …) into words so TTS stays listenable.
 
 ## Layout
 
