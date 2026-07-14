@@ -29,6 +29,16 @@ from .player import Player
 from .transcript import load_turn
 
 
+def _public_config_dict(cfg) -> dict:
+    """Settings for ``config --show`` — never the raw API key.
+
+    Config only stores non-secret fields (including ``api_key_env`` as a name
+    and ``hotkeys`` as a bool). Do not filter names containing the substring
+    ``key``; that incorrectly omitted ``hotkeys``.
+    """
+    return {k: v for k, v in cfg.__dict__.items() if not str(k).startswith("_")}
+
+
 def _plugin_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
@@ -620,9 +630,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         ]
     ):
         print(f"config: {config_path()}")
-        # Never dump secrets — only non-secret settings
-        public = {k: v for k, v in cfg.__dict__.items() if "key" not in k.lower() or k == "api_key_env"}
-        print(json.dumps(public, indent=2))
+        print(json.dumps(_public_config_dict(cfg), indent=2))
         print(f"api_key_source: {cfg.api_key_source()}")
         print(f"api_key_present: {bool(cfg.api_key())}")
         print(f"last_brief: {last_brief_path()}")

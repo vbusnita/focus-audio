@@ -26,6 +26,51 @@ def test_parse_on_off():
         cli._parse_on_off("maybe", current=True)
 
 
+def test_public_config_dict_includes_hotkeys_and_api_key_env():
+    """Regression: substring filter on 'key' used to hide hotkeys from config --show."""
+    cfg = Config(hotkeys=True, api_key_env="XAI_API_KEY", enabled=True)
+    public = cli._public_config_dict(cfg)
+    assert public["hotkeys"] is True
+    assert public["api_key_env"] == "XAI_API_KEY"
+    assert public["enabled"] is True
+    # Never a raw secret field on Config
+    assert "api_key" not in public
+
+
+def test_cmd_config_show_prints_hotkeys(tmp_path, monkeypatch, capsys):
+    cfg = Config(hotkeys=True, mode="brief", live_verbatim=False)
+    monkeypatch.setattr("focus_audio.cli.ensure_default_config", lambda: cfg)
+    monkeypatch.setattr("focus_audio.cli.config_path", lambda: tmp_path / "config.toml")
+    monkeypatch.setattr(
+        "focus_audio.cli.last_brief_path", lambda: tmp_path / "last_brief.md"
+    )
+    monkeypatch.setattr("focus_audio.cli.socket_path", lambda: tmp_path / "daemon.sock")
+    # Patch secret resolution (do not setattr methods on cfg — pollutes __dict__).
+    monkeypatch.setattr("focus_audio.secrets.get_api_key", lambda *a, **k: None)
+    monkeypatch.setattr("focus_audio.secrets.api_key_source", lambda *a, **k: "missing")
+
+    args = type(
+        "A",
+        (),
+        {
+            "show": True,
+            "voice": None,
+            "speed": None,
+            "mode": None,
+            "autoplay": None,
+            "model": None,
+            "live": None,
+            "live_then_brief": None,
+            "enabled": None,
+        },
+    )()
+    assert cli.cmd_config(args) == 0
+    out = capsys.readouterr().out
+    assert '"hotkeys": true' in out
+    assert "api_key_present: False" in out
+    assert "api_key_source: missing" in out
+
+
 def test_effective_label_off_when_disabled():
     d = FocusAudioDaemon(cfg=Config(enabled=False, mode="brief", live_verbatim=True))
     assert d.effective_label() == "off"
