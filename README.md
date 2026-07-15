@@ -27,9 +27,9 @@ Audio problems never block Grok. If Focus Audio fails, coding continues.
 1. **macOS** (primary platform today)
 2. **[Grok Build](https://docs.x.ai/build/overview)** installed and working ([product page](https://x.ai))
 3. **Python 3.9+** (`python3` on your PATH)
-4. An **xAI account** with an [API key](https://console.x.ai/team/default/api-keys) (see [Quickstart](https://docs.x.ai/developers/quickstart)), a positive balance in the [Cloud Console](https://console.x.ai/), and access to [Text to Speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech)
+4. An **xAI account** with an [API key](https://console.x.ai/team/default/api-keys) (see [Quickstart](https://docs.x.ai/developers/quickstart)), a positive balance in the [xAI Cloud Console](https://console.x.ai/), and access to [Text to Speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech)
 
-> Tip: `focus-audio doctor` can look fine while speech fails if the key is set but credits are empty or TTS is not enabled for your account. Check the [console](https://console.x.ai/) and the [TTS docs](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech) if you hear nothing.
+> Tip: `focus-audio doctor` can look fine while speech fails if the key is set but credits are empty or TTS is not enabled for your account. Check the [xAI Cloud Console](https://console.x.ai/) and the [TTS docs](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech) if you hear nothing.
 
 ### Official xAI docs (handy bookmarks)
 
@@ -38,7 +38,7 @@ Audio problems never block Grok. If Focus Audio fails, coding continues.
 | Get started (account + first API call) | [Quickstart](https://docs.x.ai/developers/quickstart) |
 | Create / manage API keys | [API Keys in Console](https://console.x.ai/team/default/api-keys) |
 | Grok Build (the coding agent this plugin attaches to) | [Grok Build overview](https://docs.x.ai/build/overview) |
-| Cloud Console (keys, usage, models) | [console.x.ai](https://console.x.ai/) |
+| xAI Cloud Console (keys, usage, models) | [console.x.ai](https://console.x.ai/) |
 | Text to Speech (what Focus Audio uses for audio) | [TTS guide](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech) |
 | Voice overview (TTS, STT, realtime) | [Voice APIs](https://docs.x.ai/developers/model-capabilities/audio/voice) |
 | Text generation / chat (used for brief rewrite) | [Generate text](https://docs.x.ai/developers/model-capabilities/text/generate-text) |
@@ -115,10 +115,16 @@ focus-audio status
 
 In Grok, run `/hooks` and confirm **focus-audio** is listed. You may need `/hooks-trust` once.
 
-**Quick smoke test** (speaks a sample line; uses a little API credit):
+**Quick smoke test** — speaks a sample line. This hits the TTS API and uses a small amount of API credit:
 
 ```bash
 echo "We fixed login and added tests. Next deploy staging." | focus-audio speak -
+```
+
+Use `--no-play` if you only want to exercise synthesis (still uses API credit; skips local playback):
+
+```bash
+echo "We fixed login and added tests. Next deploy staging." | focus-audio speak - --no-play
 ```
 
 ### Update later
@@ -136,6 +142,7 @@ Most of the time you do nothing. When a turn finishes, Focus Audio speaks automa
 
 | I want to… | Do this |
 |------------|---------|
+| Health check / troubleshoot | `focus-audio doctor` |
 | Pause / resume | `Ctrl+Shift+Space` or `/audio-toggle` |
 | Restart from the start | `Ctrl+Shift+R` or `/audio-restart` |
 | Skip this clip | `Ctrl+Shift+.` or `/audio-skip` |
@@ -192,7 +199,7 @@ focus-audio config --show
 - Sometimes a **[text generation / chat](https://docs.x.ai/developers/model-capabilities/text/generate-text)** call to rewrite a short brief (skipped when the cleaned text is already short)
 - A **[text-to-speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech)** call to turn text into audio (including live chunks)
 
-Restarting the **same** clip from cache does not call the API again. Prices and free tiers change; see [xAI pricing](https://docs.x.ai/developers/pricing) and your usage in the [console](https://console.x.ai/).
+Restarting the **same** clip from cache does not call the API again. Prices and free tiers change; see [xAI pricing](https://docs.x.ai/developers/pricing) and your usage in the [xAI Cloud Console](https://console.x.ai/).
 
 ---
 
@@ -302,9 +309,11 @@ live_skip_stop_brief = true
 live_then_brief = true
 ```
 
-Change from the CLI, for example:
+Change settings from the CLI without editing the file by hand. Examples:
 
 ```bash
+focus-audio config --voice ara
+focus-audio config --speed 1.2
 focus-audio config --mode brief
 focus-audio config --live false
 focus-audio config --show
