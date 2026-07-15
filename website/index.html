@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Focus Audio — Spoken briefs for Grok Build</title>
+  <meta name="description" content="Listen to your coding agent. Focus Audio speaks brief, verbatim, or live mid-turn audio for Grok Build using your own xAI API key." />
+  <meta name="theme-color" content="#0a0a0c" />
+  <meta property="og:title" content="Focus Audio" />
+  <meta property="og:description" content="Spoken focus briefs for Grok Build — your xAI key, hotkeys, MIT." />
+  <meta property="og:type" content="website" />
+  <!-- Set after you add a real screenshot:
+  <meta property="og:image" content="https://vbusnita.github.io/focus-audio/media/hero.png" />
+  -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./">Focus Audio</a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#media">See it</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/vbusnita/focus-audio">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">Grok Build plugin · macOS · MIT</p>
+      <h1>Listen to your coding agent instead of reading every wall of text.</h1>
+      <p class="lede">
+        Focus Audio speaks a short recap when a turn finishes — or mid-turn if you want live speech —
+        using <strong>your</strong> xAI API key. Nothing is billed through this project.
+      </p>
+      <div class="actions">
+        <a class="btn primary" href="https://github.com/vbusnita/focus-audio#install-about-five-minutes">Get started</a>
+        <a class="btn ghost" href="https://github.com/vbusnita/focus-audio">View on GitHub</a>
+      </div>
+    </section>
+
+    <section id="features" class="features">
+      <h2>What you get</h2>
+      <div class="grid">
+        <article>
+          <h3>Brief</h3>
+          <p>Default short recap: what happened, what changed, what to do next.</p>
+        </article>
+        <article>
+          <h3>Verbatim</h3>
+          <p>Full reply cleaned for speech. Big code blocks become short placeholders.</p>
+        </article>
+        <article>
+          <h3>Live</h3>
+          <p>Optional mid-turn speech while the agent is still writing.</p>
+        </article>
+        <article>
+          <h3>Controls</h3>
+          <p>Play/pause, skip, rebrief, mode toggle — hotkeys or slash commands.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="media" class="media">
+      <h2>See it</h2>
+      <p class="section-note">
+        Real captures go here — Grok Build TUI screenshots, QuickTime of a session, and
+        <code>focus-audio doctor</code>. Drop files into <code>media/</code> and wire the paths below.
+      </p>
+
+      <div class="media-grid">
+        <figure class="slot" data-slot="hero">
+          <div class="placeholder">
+            <span class="label">Hero</span>
+            <p>Grok Build TUI with a completed turn<br /><code>media/hero.png</code> or <code>.mp4</code></p>
+          </div>
+          <!-- Uncomment when ready:
+          <img src="media/hero.png" alt="Grok Build session with Focus Audio speaking" width="1600" height="1000" />
+          <video controls playsinline poster="media/hero-poster.png">
+            <source src="media/session.mp4" type="video/mp4" />
+          </video>
+          -->
+          <figcaption>Session in Grok Build</figcaption>
+        </figure>
+
+        <figure class="slot" data-slot="doctor">
+          <div class="placeholder">
+            <span class="label">Doctor</span>
+            <p>Terminal: <code>focus-audio doctor</code><br /><code>media/doctor.png</code></p>
+          </div>
+          <!-- Uncomment when ready:
+          <img src="media/doctor.png" alt="focus-audio doctor overall OK" width="1400" height="900" />
+          -->
+          <figcaption>Health check</figcaption>
+        </figure>
+
+        <figure class="slot" data-slot="hotkeys">
+          <div class="placeholder">
+            <span class="label">Hotkeys</span>
+            <p>Optional: cheat sheet or in-session shot<br /><code>media/hotkeys.png</code></p>
+          </div>
+          <figcaption>Controls</figcaption>
+        </figure>
+      </div>
+
+      <div class="hotkeys-list">
+        <h3>Global hotkeys</h3>
+        <ul>
+          <li><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Space</kbd> Play / pause</li>
+          <li><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>R</kbd> Restart</li>
+          <li><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>.</kbd> Skip</li>
+          <li><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>B</kbd> Re-brief</li>
+          <li><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>M</kbd> Brief ↔ verbatim</li>
+        </ul>
+        <p class="hint">Requires Accessibility for the Terminal or Python host that runs Grok.</p>
+      </div>
+    </section>
+
+    <section id="install" class="install">
+      <h2>Install</h2>
+      <p>About five minutes. Full steps and privacy notes live in the repo README.</p>
+      <pre class="code"><code>git clone https://github.com/vbusnita/focus-audio.git
+cd focus-audio
+chmod +x bin/focus-audio
+grok plugin install . --trust
+focus-audio doctor</code></pre>
+      <p>
+        Add your xAI API key (Keychain service <code>xai-api-key</code> or <code>XAI_API_KEY</code>).
+        Open a <strong>new</strong> Grok Build session so hooks load.
+      </p>
+      <a class="btn primary" href="https://github.com/vbusnita/focus-audio#install-about-five-minutes">Full install guide →</a>
+    </section>
+
+    <section class="privacy">
+      <h2>Your key. Your machine.</h2>
+      <p>
+        Speech and brief rewrite call xAI with <strong>your</strong> key.
+        Focus Audio does not ship a shared key or send analytics to the author.
+        Prefer brief over live+verbatim when you want less raw text leaving the Mac.
+      </p>
+      <a href="https://github.com/vbusnita/focus-audio/blob/main/SECURITY.md">SECURITY.md</a>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      <a href="https://github.com/vbusnita/focus-audio">vbusnita/focus-audio</a>
+      · MIT
+      · <a href="https://docs.x.ai/build/overview">Grok Build</a>
+    </p>
+  </footer>
+</body>
+</html>
