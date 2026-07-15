@@ -334,10 +334,13 @@ def test_after_live_plays_distinct_brief_when_llm_ran():
         cfg=Config(mode="brief", live_verbatim=True, live_then_brief=True)
     )
     d._live_spoken = 2
+    # Live only spoke a little of a long reply → recap is useful.
+    d._live_word_count = 20
     d._job_gen = 1
     ready = MagicMock()
     ready.brief_skipped = False  # real summary rewrite
     ready.mode = "brief"
+    ready.cleaned = " ".join(["word"] * 200)  # long source; coverage low
     ready.entry = MagicMock()
     ready.script = "short summary of the turn"
     ready.from_cache = False
@@ -349,6 +352,33 @@ def test_after_live_plays_distinct_brief_when_llm_ran():
     with patch("focus_audio.daemon.resolve_from_session", return_value=ready):
         d._run_session_job(1, "s1", "/w", False, None, after_live=True)
     assert played == [ready]
+
+
+def test_after_live_skips_when_live_coverage_high():
+    """Live already spoke most of the cleaned source → no second pass."""
+    d = FocusAudioDaemon(
+        cfg=Config(mode="brief", live_verbatim=True, live_then_brief=True)
+    )
+    d._live_spoken = 3
+    d._live_word_count = 90
+    d._job_gen = 1
+    ready = MagicMock()
+    ready.brief_skipped = False
+    ready.mode = "brief"
+    ready.cleaned = " ".join(["word"] * 100)  # coverage 0.9
+    ready.entry = MagicMock()
+    ready.script = "a rewritten brief"
+    ready.from_cache = False
+    ready.brief_fallback = False
+    played: list = []
+    d._stream_play = lambda gen, r: played.append(r)  # type: ignore[method-assign]
+    d._play_chime = lambda: None  # type: ignore[method-assign]
+
+    with patch("focus_audio.daemon.resolve_from_session", return_value=ready) as res:
+        d._run_session_job(1, "s1", "/w", False, "verbatim", after_live=True)
+    assert played == []
+    # After-live always requests brief even if caller passed verbatim.
+    assert res.call_args.kwargs["mode"] == "brief"
 
 
 def test_live_on_defaults_to_live_only_effective():
