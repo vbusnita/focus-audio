@@ -152,8 +152,8 @@ Grok’s built-in keyboard cheatsheet does **not** list plugin shortcuts. Use th
 **Brief vs live (short version):**
 
 - **Brief only** — quieter, less data sent: good default.
-- **Live + brief** — hear progress during the turn, then a short recap after (when `live_then_brief` is on).
-- **Live + verbatim** — mid-turn speech only; it does not re-read the whole turn twice.
+- **Live only** (default with live on) — mid-turn speech; no second pass after the turn.
+- **Live + brief** — hear progress during the turn, then a short recap after (opt-in: `live_then_brief = true`).
 
 `focus-audio status` shows an `effective` field: `brief`, `verbatim`, `live_verbatim`, `live+brief`, or `off`.
 
@@ -299,7 +299,7 @@ live_verbatim = false
 live_min_chars = 40
 live_poll_ms = 150
 live_skip_stop_brief = true
-live_then_brief = true
+live_then_brief = false   # set true only if you want a recap *after* live
 ```
 
 Change from the CLI, for example:

@@ -83,7 +83,8 @@ class FocusAudioDaemon:
             live_segs = self._live_segments
             live_q = self._live_queue
             skip_brief = bool(getattr(self.cfg, "live_skip_stop_brief", True))
-            live_then = bool(getattr(self.cfg, "live_then_brief", True))
+            live_then = bool(getattr(self.cfg, "live_then_brief", False))
+            live_spoken = int(self._live_spoken or 0)
             # Post-turn path uses cfg.mode (or explicit override).
             post_mode = (mode or self.cfg.mode or "brief").lower()
         live_pending = bool(live_q and (not live_q.closed or live_q.pending() > 0))
@@ -99,9 +100,10 @@ class FocusAudioDaemon:
         if not after_live and live_covers and skip_brief and not force:
             # Do not cancel live — drain the queue to the last word.
             #
-            # live_then_brief is for "hear live progress, then a *brief* summary".
-            # When post-turn mode is already verbatim, a second pass re-reads the
-            # same reply after live just spoke it — skip that duplicate.
+            # live_then_brief is opt-in: "hear live progress, then a *brief* summary".
+            # Default is off so a turn is not spoken twice (live verbatim + brief).
+            # When post-turn mode is already verbatim, a second pass would re-read
+            # the same reply after live just spoke it — always skip that duplicate.
             if live_then and post_mode != "verbatim":
                 self._schedule_after_live_brief(session_id, cwd)
                 return {
@@ -109,12 +111,13 @@ class FocusAudioDaemon:
                     "deferred": "live_then_brief",
                     "segments": live_segs,
                     "live_active": live_active,
+                    "spoken": live_spoken,
                     "mode": self.cfg.mode,
                     "effective": self.effective_label(),
                 }
             reason = (
                 "live_covered_verbatim"
-                if live_then and post_mode == "verbatim"
+                if post_mode == "verbatim"
                 else "live_covered"
             )
             return {
@@ -122,6 +125,7 @@ class FocusAudioDaemon:
                 "skipped": reason,
                 "segments": live_segs,
                 "live_active": live_active,
+                "spoken": live_spoken,
                 "mode": self.cfg.mode,
             }
 
@@ -137,7 +141,7 @@ class FocusAudioDaemon:
             self._last_session = {"session_id": session_id, "cwd": cwd}
         t = threading.Thread(
             target=self._run_session_job,
-            args=(gen, session_id, cwd, force, mode),
+            args=(gen, session_id, cwd, force, mode, after_live),
             daemon=True,
             name=f"focus-audio-job-{gen}",
         )
@@ -286,7 +290,7 @@ class FocusAudioDaemon:
             status = self._status
             mode = (self.cfg.mode or "brief").lower()
             live_on = bool(getattr(self.cfg, "live_verbatim", False))
-            live_then = bool(getattr(self.cfg, "live_then_brief", True))
+            live_then = bool(getattr(self.cfg, "live_then_brief", False))
             skip_stop = bool(getattr(self.cfg, "live_skip_stop_brief", True))
             enabled = bool(self.cfg.enabled)
         if not enabled:
@@ -501,6 +505,7 @@ class FocusAudioDaemon:
         cwd: Optional[str],
         force: bool,
         mode: Optional[str],
+        after_live: bool = False,
     ) -> None:
         try:
             if not self._still_current(gen):
@@ -508,8 +513,7 @@ class FocusAudioDaemon:
             with self._lock:
                 self._status = "synthesizing"
                 self._active_gen = gen
-            if self.cfg.chime:
-                self._play_chime()
+                live_spoken = int(self._live_spoken or 0)
             # Stop can fire slightly before chat_history is flushed — retry briefly.
             ready = None
             last_err: Optional[str] = None
@@ -537,6 +541,18 @@ class FocusAudioDaemon:
                     file=sys.stderr,
                 )
                 return
+            # After-live second pass: skip when it would re-speak what live already
+            # said (verbatim mode, or brief path that skipped the LLM rewrite so
+            # the script is essentially the same cleaned source).
+            use_mode = (mode or self.cfg.mode or "brief").lower()
+            if after_live and live_spoken > 0 and not force:
+                if use_mode == "verbatim" or bool(getattr(ready, "brief_skipped", False)):
+                    with self._lock:
+                        self._status = "idle"
+                        self._error = None
+                    return
+            if self.cfg.chime:
+                self._play_chime()
             self._stream_play(gen, ready)
         except Exception as e:
             if self._still_current(gen):
@@ -898,7 +914,7 @@ class FocusAudioDaemon:
                 "spoken": live_spoken,
                 "pending": pending,
                 "enabled": bool(getattr(self.cfg, "live_verbatim", False)),
-                "then_brief": bool(getattr(self.cfg, "live_then_brief", True)),
+                "then_brief": bool(getattr(self.cfg, "live_then_brief", False)),
                 "skip_stop_brief": bool(
                     getattr(self.cfg, "live_skip_stop_brief", True)
                 ),
@@ -910,7 +926,7 @@ class FocusAudioDaemon:
                 "enabled": self.cfg.enabled,
                 "model": self.cfg.model,
                 "live_verbatim": bool(getattr(self.cfg, "live_verbatim", False)),
-                "live_then_brief": bool(getattr(self.cfg, "live_then_brief", True)),
+                "live_then_brief": bool(getattr(self.cfg, "live_then_brief", False)),
                 "live_skip_stop_brief": bool(
                     getattr(self.cfg, "live_skip_stop_brief", True)
                 ),
