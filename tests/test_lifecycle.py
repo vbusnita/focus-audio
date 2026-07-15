@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,3 +34,41 @@ def test_release_unknown_is_safe(tmp_path, monkeypatch):
     r = lifecycle.release_session("nope")
     assert r["count"] == 0
     assert r["released"] is False
+
+
+def test_acquire_prunes_stale_sessions(tmp_path, monkeypatch):
+    refs = tmp_path / "session_refs.json"
+    monkeypatch.setattr(lifecycle, "refs_path", lambda: refs)
+    now = time.time()
+    # Plant a stale + a fresh session without going through acquire.
+    state = {
+        "sessions": {
+            "old": now - 8 * 3600,
+            "fresh": now - 60,
+        },
+        "updated_at": now,
+    }
+    refs.write_text(__import__("json").dumps(state), encoding="utf-8")
+    out = lifecycle.acquire_session("new", max_age_s=6 * 3600)
+    assert "old" in out.get("pruned", [])
+    assert out["pruned_count"] >= 1
+    assert "new" in out["sessions"]
+    assert "fresh" in out["sessions"]
+    assert "old" not in out["sessions"]
+    assert out["count"] == 2
+
+
+def test_prune_stale_sessions_explicit(tmp_path, monkeypatch):
+    refs = tmp_path / "session_refs.json"
+    monkeypatch.setattr(lifecycle, "refs_path", lambda: refs)
+    now = 1_700_000_000.0
+    refs.write_text(
+        __import__("json").dumps(
+            {"sessions": {"a": now - 100, "b": now - 10}, "updated_at": now}
+        ),
+        encoding="utf-8",
+    )
+    out = lifecycle.prune_stale_sessions(max_age_s=50, now=now)
+    assert out["pruned"] == ["a"]
+    assert out["count"] == 1
+    assert out["sessions"] == ["b"]

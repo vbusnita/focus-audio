@@ -55,6 +55,7 @@ class FocusAudioDaemon:
         self._live_cwd: Optional[str] = None
         self._live_segments = 0  # accepted into queue (not only finished)
         self._live_spoken = 0  # fully played to completion
+        self._live_word_count = 0  # words actually spoken mid-turn (for coverage)
         self._live_active = False
         self._live_queue: Optional[LiveSegmentQueue] = None
         # Cancel token for deferred post-live brief (live_then_brief).
@@ -102,8 +103,9 @@ class FocusAudioDaemon:
             #
             # live_then_brief is opt-in: "hear live progress, then a *brief* summary".
             # Default is off so a turn is not spoken twice (live verbatim + brief).
-            # When post-turn mode is already verbatim, a second pass would re-read
-            # the same reply after live just spoke it — always skip that duplicate.
+            # Never schedule when post mode is already verbatim (would re-read).
+            # After-live playback always forces mode=brief and skips when live
+            # already covered enough of the reply (see _run_session_job).
             if live_then and post_mode != "verbatim":
                 self._schedule_after_live_brief(session_id, cwd)
                 return {
@@ -179,6 +181,7 @@ class FocusAudioDaemon:
             self._live_cwd = cwd
             self._live_segments = 0
             self._live_spoken = 0
+            self._live_word_count = 0
             self._status = "live"
             self._error = None
             self._last_session = {"session_id": session_id, "cwd": cwd}
@@ -277,8 +280,9 @@ class FocusAudioDaemon:
             if token != self._post_live_token:
                 return
         try:
+            # Always brief for the post-live recap — never re-read verbatim.
             self.enqueue_session(
-                session_id, cwd, force=False, after_live=True
+                session_id, cwd, force=False, mode="brief", after_live=True
             )
         except Exception as e:
             print(f"focus-audio live_then_brief error: {e}", file=sys.stderr)
@@ -412,8 +416,10 @@ class FocusAudioDaemon:
 
                 spoken += 1
                 scripts.append(prepared.script)
+                seg_words = len((prepared.script or "").split())
                 with self._lock:
                     self._live_spoken = spoken
+                    self._live_word_count = int(self._live_word_count or 0) + seg_words
                     # Keep accepted count as the public "segments" metric; also
                     # never drop below spoken.
                     self._live_segments = max(self._live_segments, spoken)
@@ -426,6 +432,7 @@ class FocusAudioDaemon:
                                 "from_cache": prepared.from_cache,
                                 "segment": spoken,
                                 "accepted": self._live_segments,
+                                "live_words": self._live_word_count,
                                 "audio": str(prepared.entry.audio_path),
                                 "script": str(prepared.entry.script_path),
                                 "streaming": False,
@@ -514,6 +521,9 @@ class FocusAudioDaemon:
                 self._status = "synthesizing"
                 self._active_gen = gen
                 live_spoken = int(self._live_spoken or 0)
+                live_words = int(self._live_word_count or 0)
+            # After-live recap is always a brief, never a second full read.
+            job_mode = "brief" if after_live else mode
             # Stop can fire slightly before chat_history is flushed — retry briefly.
             ready = None
             last_err: Optional[str] = None
@@ -522,7 +532,7 @@ class FocusAudioDaemon:
                     return
                 try:
                     ready = resolve_from_session(
-                        session_id, self.cfg, cwd=cwd, mode=mode, force=force
+                        session_id, self.cfg, cwd=cwd, mode=job_mode, force=force
                     )
                 except Exception as e:
                     last_err = str(e)
@@ -541,12 +551,24 @@ class FocusAudioDaemon:
                     file=sys.stderr,
                 )
                 return
-            # After-live second pass: skip when it would re-speak what live already
-            # said (verbatim mode, or brief path that skipped the LLM rewrite so
-            # the script is essentially the same cleaned source).
-            use_mode = (mode or self.cfg.mode or "brief").lower()
+            # After-live second pass: never double-speak what live already covered.
+            # Skip when:
+            #  - caller asked for verbatim (should not happen; we force brief)
+            #  - brief path skipped LLM rewrite (script ≈ cleaned source live said)
+            #  - live already spoke most of the cleaned source (coverage)
+            use_mode = (job_mode or self.cfg.mode or "brief").lower()
             if after_live and live_spoken > 0 and not force:
-                if use_mode == "verbatim" or bool(getattr(ready, "brief_skipped", False)):
+                cleaned = getattr(ready, "cleaned", "") or ""
+                cleaned_words = len(cleaned.split()) if cleaned.strip() else 0
+                coverage = (
+                    (live_words / cleaned_words) if cleaned_words > 0 else 1.0
+                )
+                brief_skipped = bool(getattr(ready, "brief_skipped", False))
+                if (
+                    use_mode == "verbatim"
+                    or brief_skipped
+                    or coverage >= 0.55
+                ):
                     with self._lock:
                         self._status = "idle"
                         self._error = None
