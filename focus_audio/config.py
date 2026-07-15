@@ -41,9 +41,10 @@ DEFAULTS: Dict[str, Any] = {
     "live_poll_ms": 150,
     # When live spoke at least one segment this turn, skip the immediate Stop-hook brief.
     "live_skip_stop_brief": True,
-    # After live finishes, also play post-turn audio in cfg.mode.
-    # Only applied when mode is *not* verbatim (verbatim+live would re-read twice).
-    "live_then_brief": True,
+    # After live finishes, also play post-turn audio in cfg.mode (a second pass).
+    # Default off: live already spoke the turn; enabling means live chunks + recap.
+    # Never applied when mode is verbatim (would re-read the same reply twice).
+    "live_then_brief": False,
 }
 
 
@@ -71,7 +72,7 @@ class Config:
     live_min_chars: int = 40
     live_poll_ms: int = 150
     live_skip_stop_brief: bool = True
-    live_then_brief: bool = True
+    live_then_brief: bool = False
 
     def api_key(self) -> Optional[str]:
         """Resolve user API key (Keychain or env); never read/write secrets from config.toml."""
@@ -129,7 +130,7 @@ def _dump_toml_flat(data: Dict[str, Any]) -> str:
         "# Focus Audio config — edit freely; restart daemon to pick up most changes.",
         "# mode: brief | verbatim  (Ctrl+Shift+M re-speaks last turn in the new mode)",
         "# live_verbatim: mid-turn speech",
-        "# live_then_brief: after live, also play mode (skipped automatically when mode=verbatim)",
+        "# live_then_brief: after live, also play mode (opt-in second pass; off by default)",
         "",
     ]
     for key, value in data.items():

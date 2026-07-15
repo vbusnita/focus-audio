@@ -16,7 +16,8 @@ from focus_audio.daemon import FocusAudioDaemon  # noqa: E402
 
 def test_config_live_then_brief_default():
     cfg = Config()
-    assert cfg.live_then_brief is True
+    # Off by default so live does not also play a post-turn brief (double speak).
+    assert cfg.live_then_brief is False
     assert cfg.live_skip_stop_brief is True
     assert cfg.mode == "brief"
 
@@ -300,6 +301,63 @@ def test_enqueue_after_live_bypasses_skip():
     assert out.get("ok") is True
     assert out.get("job") is not None
     assert len(jobs) == 1
+    # after_live is forwarded into the session job so it can skip redundant plays.
+    job_args = jobs[0]
+    assert job_args[-1] is True  # after_live flag
+
+
+def test_after_live_skips_when_brief_would_repeat_live():
+    """Short replies skip the LLM rewrite → same text live already spoke; do not replay."""
+    d = FocusAudioDaemon(
+        cfg=Config(mode="brief", live_verbatim=True, live_then_brief=True)
+    )
+    d._live_spoken = 2
+    d._job_gen = 1
+    ready = MagicMock()
+    ready.brief_skipped = True
+    ready.mode = "brief"
+    ready.entry = MagicMock()
+    ready.script = "same short text"
+    ready.from_cache = False
+    ready.brief_fallback = False
+    played: list = []
+    d._stream_play = lambda gen, r: played.append(r)  # type: ignore[method-assign]
+    d._play_chime = lambda: None  # type: ignore[method-assign]
+
+    with patch("focus_audio.daemon.resolve_from_session", return_value=ready):
+        d._run_session_job(1, "s1", "/w", False, None, after_live=True)
+    assert played == []
+
+
+def test_after_live_plays_distinct_brief_when_llm_ran():
+    d = FocusAudioDaemon(
+        cfg=Config(mode="brief", live_verbatim=True, live_then_brief=True)
+    )
+    d._live_spoken = 2
+    d._job_gen = 1
+    ready = MagicMock()
+    ready.brief_skipped = False  # real summary rewrite
+    ready.mode = "brief"
+    ready.entry = MagicMock()
+    ready.script = "short summary of the turn"
+    ready.from_cache = False
+    ready.brief_fallback = False
+    played: list = []
+    d._stream_play = lambda gen, r: played.append(r)  # type: ignore[method-assign]
+    d._play_chime = lambda: None  # type: ignore[method-assign]
+
+    with patch("focus_audio.daemon.resolve_from_session", return_value=ready):
+        d._run_session_job(1, "s1", "/w", False, None, after_live=True)
+    assert played == [ready]
+
+
+def test_live_on_defaults_to_live_only_effective():
+    """live_verbatim without live_then_brief → live_verbatim, not live+brief."""
+    d = FocusAudioDaemon(
+        cfg=Config(mode="brief", live_verbatim=True)  # live_then_brief default False
+    )
+    assert d.cfg.live_then_brief is False
+    assert d.effective_label() == "live_verbatim"
 
 
 def test_status_includes_effective():
