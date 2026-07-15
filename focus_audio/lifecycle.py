@@ -15,6 +15,10 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from .paths import data_dir, secure_chmod_file, secure_mkdir, secure_write_text
 
+# Stale refs accumulate when SessionEnd hooks miss (crashes, force-quit).
+# Default TTL keeps ensure from counting long-dead Grok windows forever.
+DEFAULT_SESSION_TTL_S = 6 * 3600  # 6 hours
+
 
 def refs_path() -> Path:
     return data_dir() / "session_refs.json"
@@ -22,6 +26,31 @@ def refs_path() -> Path:
 
 def _empty_state() -> dict:
     return {"sessions": {}, "updated_at": time.time()}
+
+
+def _prune_sessions_inplace(
+    sessions: Dict[str, float],
+    *,
+    max_age_s: float,
+    now: Optional[float] = None,
+) -> List[str]:
+    """Drop entries older than max_age_s. Returns pruned session ids."""
+    if max_age_s <= 0 or not sessions:
+        return []
+    t = float(now if now is not None else time.time())
+    cutoff = t - float(max_age_s)
+    pruned: List[str] = []
+    for sid, ts in list(sessions.items()):
+        try:
+            age_anchor = float(ts)
+        except (TypeError, ValueError):
+            pruned.append(sid)
+            del sessions[sid]
+            continue
+        if age_anchor < cutoff:
+            pruned.append(sid)
+            del sessions[sid]
+    return pruned
 
 
 def _read_unlocked(path: Path) -> dict:
@@ -67,26 +96,46 @@ def _with_lock(fn: Callable[[dict], dict]) -> Tuple[dict, dict]:
             fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
 
 
-def acquire_session(session_id: Optional[str] = None) -> dict:
-    """Register a Grok session. Returns summary for hooks/CLI."""
+def acquire_session(
+    session_id: Optional[str] = None,
+    *,
+    max_age_s: float = DEFAULT_SESSION_TTL_S,
+) -> dict:
+    """Register a Grok session. Returns summary for hooks/CLI.
+
+    Also prunes refs older than max_age_s so missed SessionEnd hooks do not
+    pin the daemon refcount forever.
+    """
     sid = (session_id or "").strip() or f"anon-{os.getpid()}-{int(time.time())}"
 
     def mut(state: dict) -> dict:
         sessions: Dict[str, float] = state.setdefault("sessions", {})
+        pruned = _prune_sessions_inplace(sessions, max_age_s=max_age_s)
         sessions[sid] = time.time()
-        return {"session_id": sid, "count": len(sessions), "acquired": True}
+        return {
+            "session_id": sid,
+            "count": len(sessions),
+            "acquired": True,
+            "pruned": pruned,
+            "pruned_count": len(pruned),
+        }
 
     result, state = _with_lock(mut)
     result["sessions"] = list(state.get("sessions", {}).keys())
     return result
 
 
-def release_session(session_id: Optional[str] = None) -> dict:
+def release_session(
+    session_id: Optional[str] = None,
+    *,
+    max_age_s: float = DEFAULT_SESSION_TTL_S,
+) -> dict:
     """Unregister a Grok session. count==0 means daemon should shut down."""
     sid = (session_id or "").strip()
 
     def mut(state: dict) -> dict:
         sessions: Dict[str, float] = state.setdefault("sessions", {})
+        pruned = _prune_sessions_inplace(sessions, max_age_s=max_age_s)
         released = False
         used: Optional[str] = sid or None
         if sid and sid in sessions:
@@ -101,6 +150,30 @@ def release_session(session_id: Optional[str] = None) -> dict:
             "session_id": used,
             "count": len(sessions),
             "released": released,
+            "pruned": pruned,
+            "pruned_count": len(pruned),
+        }
+
+    result, state = _with_lock(mut)
+    result["sessions"] = list(state.get("sessions", {}).keys())
+    return result
+
+
+def prune_stale_sessions(
+    *,
+    max_age_s: float = DEFAULT_SESSION_TTL_S,
+    now: Optional[float] = None,
+) -> dict:
+    """Explicit prune (doctor / CLI). Does not acquire a session."""
+
+    def mut(state: dict) -> dict:
+        sessions: Dict[str, float] = state.setdefault("sessions", {})
+        pruned = _prune_sessions_inplace(sessions, max_age_s=max_age_s, now=now)
+        return {
+            "count": len(sessions),
+            "pruned": pruned,
+            "pruned_count": len(pruned),
+            "max_age_s": max_age_s,
         }
 
     result, state = _with_lock(mut)

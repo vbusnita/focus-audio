@@ -41,9 +41,9 @@ DEFAULTS: Dict[str, Any] = {
     "live_poll_ms": 150,
     # When live spoke at least one segment this turn, skip the immediate Stop-hook brief.
     "live_skip_stop_brief": True,
-    # After live finishes, also play post-turn audio in cfg.mode (a second pass).
-    # Default off: live already spoke the turn; enabling means live chunks + recap.
-    # Never applied when mode is verbatim (would re-read the same reply twice).
+    # After live finishes, optionally play a *brief* recap (second pass).
+    # Default off. When on, still skips if mode=verbatim, brief rewrite was
+    # skipped (same short text), or live already covered most of the reply.
     "live_then_brief": False,
 }
 
