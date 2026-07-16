@@ -19,7 +19,11 @@ from focus_audio.transcript import (  # noqa: E402
     extract_assistant_contents,
     find_session_dir,
     last_assistant_text,
+    last_assistant_text_from_history,
+    last_assistant_text_from_updates,
+    load_turn,
     path_basename,
+    session_dir_from_transcript_path,
     strip_harness_metadata,
 )
 
@@ -375,3 +379,134 @@ def test_find_session_dir(tmp_path: Path):
 
     found2 = find_session_dir(sid, cwd=None, root=tmp_path)
     assert found2 == sess
+
+
+def _updates_line(session_update: str, text: str = "") -> str:
+    update: dict = {"sessionUpdate": session_update}
+    if session_update == "agent_message_chunk":
+        update["content"] = {"type": "text", "text": text}
+    return json.dumps(
+        {
+            "timestamp": 1,
+            "method": "session/update",
+            "params": {"sessionId": "s", "update": update},
+        }
+    )
+
+
+def test_session_dir_from_transcript_path(tmp_path: Path):
+    sess = tmp_path / "019f-sid"
+    sess.mkdir()
+    updates = sess / "updates.jsonl"
+    updates.write_text("{}\n", encoding="utf-8")
+    assert session_dir_from_transcript_path(str(updates)) == sess
+    assert session_dir_from_transcript_path(str(sess)) == sess
+    assert session_dir_from_transcript_path("") is None
+
+
+def test_find_session_dir_via_transcript_path(tmp_path: Path):
+    sid = "019f-via-tx"
+    sess = tmp_path / "workspace" / sid
+    sess.mkdir(parents=True)
+    updates = sess / "updates.jsonl"
+    updates.write_text("{}\n", encoding="utf-8")
+    found = find_session_dir(
+        sid, cwd=None, root=tmp_path, transcript_path=str(updates)
+    )
+    assert found == sess
+
+
+def test_last_assistant_from_updates_prefers_stream(tmp_path: Path):
+    updates = tmp_path / "updates.jsonl"
+    history = tmp_path / "chat_history.jsonl"
+    # History is stale / lagging; updates has the real last turn.
+    history.write_text(
+        json.dumps(
+            {
+                "type": "assistant",
+                "content": "Old history reply that should not win when updates exist.",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    lines = [
+        _updates_line("agent_message_chunk", "First turn message long enough. "),
+        _updates_line("turn_completed"),
+        _updates_line("user_message_chunk", "next"),
+        _updates_line("agent_message_chunk", "Second turn "),
+        _updates_line("agent_message_chunk", "assembled from chunks for speech."),
+        _updates_line("turn_completed"),
+    ]
+    updates.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    from_u = last_assistant_text_from_updates(tmp_path)
+    assert from_u is not None
+    assert "Second turn" in from_u
+    assert "assembled from chunks" in from_u
+    assert "First turn" not in from_u
+
+    # Prefer updates over history.
+    assert last_assistant_text(tmp_path) == from_u
+    assert "Old history" in (last_assistant_text_from_history(tmp_path) or "")
+
+
+def test_last_assistant_from_updates_open_turn_before_completed(tmp_path: Path):
+    """Stop can race turn_completed — still use open agent_message assembly."""
+    updates = tmp_path / "updates.jsonl"
+    lines = [
+        _updates_line(
+            "agent_message_chunk",
+            "We finished the login fix and added tests for the edge case.",
+        ),
+        # no turn_completed yet
+    ]
+    updates.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    out = last_assistant_text_from_updates(tmp_path)
+    assert out is not None
+    assert "login fix" in out
+
+
+def test_load_turn_updates_first(tmp_path: Path):
+    cwd = "/Users/example/proj"
+    sid = "019f-load-turn"
+    sess = tmp_path / encode_cwd(cwd) / sid
+    sess.mkdir(parents=True)
+    (sess / "updates.jsonl").write_text(
+        _updates_line(
+            "agent_message_chunk",
+            "This is a sufficiently long assistant reply for the min_chars gate to pass easily.",
+        )
+        + "\n"
+        + _updates_line("turn_completed")
+        + "\n",
+        encoding="utf-8",
+    )
+    turn = load_turn(sid, cwd=cwd, root=tmp_path, min_chars=20, mode="brief")
+    assert turn is not None
+    assert "sufficiently long" in turn.raw
+    assert turn.session_dir == sess
+
+
+def test_load_turn_via_transcript_path_only(tmp_path: Path):
+    sid = "019f-tx-only"
+    sess = tmp_path / "other" / sid
+    sess.mkdir(parents=True)
+    updates = sess / "updates.jsonl"
+    body = (
+        "Reply that is long enough for load_turn min_chars without scanning sessions root."
+    )
+    updates.write_text(
+        _updates_line("agent_message_chunk", body) + "\n",
+        encoding="utf-8",
+    )
+    turn = load_turn(
+        "",
+        cwd=None,
+        root=tmp_path,
+        min_chars=20,
+        transcript_path=str(updates),
+    )
+    assert turn is not None
+    assert body in turn.raw
+    assert turn.session_id == sid

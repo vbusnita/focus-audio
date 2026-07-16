@@ -119,17 +119,61 @@ def encode_cwd(cwd: str) -> str:
     return quote(cwd, safe="")
 
 
+def session_dir_from_transcript_path(
+    transcript_path: Optional[str],
+) -> Optional[Path]:
+    """Map Grok hook ``transcriptPath`` (usually ``…/updates.jsonl``) → session dir.
+
+    Open-source Grok sets ``transcript_path`` on the hook envelope to the session's
+    ``updates.jsonl`` when that file exists. Parent directory is the session dir.
+    """
+    if not transcript_path:
+        return None
+    try:
+        p = Path(str(transcript_path)).expanduser()
+    except (TypeError, ValueError):
+        return None
+    if p.is_dir():
+        return p
+    # File path (updates.jsonl / chat_history.jsonl) or not-yet-created file.
+    if p.suffix.lower() == ".jsonl" or p.name.endswith(".jsonl"):
+        parent = p.parent
+        if parent.is_dir() or parent.exists():
+            return parent
+        # Parent may exist after a short race; still return the path for callers
+        # that only need a stable location.
+        return parent if str(parent) not in ("", ".") else None
+    if p.is_file():
+        return p.parent
+    return None
+
+
 def find_session_dir(
     session_id: str,
     cwd: Optional[str] = None,
     root: Optional[Path] = None,
+    *,
+    transcript_path: Optional[str] = None,
 ) -> Optional[Path]:
-    """Find ~/.grok/sessions/<encoded-cwd>/<session_id>/."""
+    """Find ~/.grok/sessions/<encoded-cwd>/<session_id>/.
+
+    Prefer ``transcript_path`` from the Grok hook envelope when present (O(1));
+    then cwd-scoped lookup; then a workspace scan.
+    """
+    from_tx = session_dir_from_transcript_path(transcript_path)
+    if from_tx is not None and from_tx.is_dir():
+        # If session_id is known, require the basename to match when possible.
+        if not session_id or from_tx.name == session_id:
+            return from_tx
+
     base = root or sessions_root()
     if not base.is_dir():
+        # transcript path may still be valid even if default sessions root differs
+        if from_tx is not None and from_tx.is_dir():
+            return from_tx
         return None
 
-    if cwd:
+    if session_id and cwd:
         candidate = base / encode_cwd(cwd) / session_id
         if candidate.is_dir():
             return candidate
@@ -138,13 +182,17 @@ def find_session_dir(
         if candidate2.is_dir():
             return candidate2
 
-    # Fallback: scan all workspaces for this session id
-    for group in base.iterdir():
-        if not group.is_dir():
-            continue
-        hit = group / session_id
-        if hit.is_dir():
-            return hit
+    if session_id:
+        # Fallback: scan all workspaces for this session id
+        for group in base.iterdir():
+            if not group.is_dir():
+                continue
+            hit = group / session_id
+            if hit.is_dir():
+                return hit
+
+    if from_tx is not None and from_tx.is_dir():
+        return from_tx
     return None
 
 
@@ -187,12 +235,84 @@ def extract_assistant_contents(chat_history: Path) -> List[str]:
     return out
 
 
-def last_assistant_text(session_dir: Path) -> Optional[str]:
+def last_assistant_text_from_history(session_dir: Path) -> Optional[str]:
+    """Last assistant message from ``chat_history.jsonl`` (may lag Stop slightly)."""
     history = session_dir / "chat_history.jsonl"
     contents = extract_assistant_contents(history)
     if not contents:
         return None
     return contents[-1]
+
+
+def last_assistant_text_from_updates(session_dir: Path) -> Optional[str]:
+    """Rebuild the last assistant turn from ``updates.jsonl`` agent_message_chunk lines.
+
+    Chunks are appended during the turn (often before ``chat_history.jsonl`` is
+    rewritten). Group by ``turn_completed``; if Stop races the completion marker,
+    return the in-progress assembly when it has text.
+    """
+    path = updates_path(session_dir)
+    if not path.is_file():
+        return None
+
+    current_parts: List[str] = []
+    last_complete: Optional[str] = None
+
+    for obj in _iter_jsonl(path):
+        update = None
+        params = obj.get("params")
+        if isinstance(params, dict) and isinstance(params.get("update"), dict):
+            update = params["update"]
+        elif isinstance(obj.get("update"), dict):
+            update = obj["update"]
+        elif obj.get("sessionUpdate"):
+            update = obj
+        if not isinstance(update, dict):
+            continue
+
+        su = update.get("sessionUpdate")
+        if su == "agent_message_chunk":
+            text = _text_from_content(update.get("content"))
+            if text:
+                current_parts.append(text)
+            continue
+        if su == "turn_completed":
+            if current_parts:
+                joined = "".join(current_parts)
+                if joined.strip():
+                    last_complete = joined
+                current_parts = []
+            continue
+        # A new user message starts a turn; flush any open assistant assembly.
+        if su == "user_message_chunk" and current_parts:
+            joined = "".join(current_parts)
+            if joined.strip():
+                last_complete = joined
+            current_parts = []
+
+    if current_parts:
+        joined = "".join(current_parts)
+        if joined.strip():
+            return joined
+    return last_complete
+
+
+def last_assistant_text(
+    session_dir: Path,
+    *,
+    prefer_updates: bool = True,
+) -> Optional[str]:
+    """Last assistant turn text for speech.
+
+    Prefer ``updates.jsonl`` (streamed during the turn) over ``chat_history.jsonl``
+    (often rewritten slightly after Stop). Fall back to history when updates are
+    missing or empty.
+    """
+    if prefer_updates:
+        from_updates = last_assistant_text_from_updates(session_dir)
+        if from_updates and from_updates.strip():
+            return from_updates
+    return last_assistant_text_from_history(session_dir)
 
 
 def path_basename(path: str) -> str:
@@ -581,18 +701,24 @@ def load_turn(
     min_chars: int = 80,
     root: Optional[Path] = None,
     mode: str = "brief",
+    *,
+    transcript_path: Optional[str] = None,
 ) -> Optional[TurnText]:
-    session_dir = find_session_dir(session_id, cwd=cwd, root=root)
+    session_dir = find_session_dir(
+        session_id, cwd=cwd, root=root, transcript_path=transcript_path
+    )
     if not session_dir:
         return None
-    raw = last_assistant_text(session_dir)
+    # Prefer updates.jsonl (ready at Stop more often) over chat_history.
+    raw = last_assistant_text(session_dir, prefer_updates=True)
     if not raw:
         return None
     cleaned = clean_for_audio(raw, mode=mode)
     if len(cleaned) < min_chars:
         return None
+    sid = session_id or session_dir.name
     return TurnText(
-        session_id=session_id,
+        session_id=sid,
         session_dir=session_dir,
         raw=raw,
         cleaned=cleaned,

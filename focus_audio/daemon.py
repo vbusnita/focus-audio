@@ -72,6 +72,7 @@ class FocusAudioDaemon:
         force: bool = False,
         mode: Optional[str] = None,
         after_live: bool = False,
+        transcript_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         if not self.cfg.enabled:
             return {"ok": True, "skipped": "disabled"}
@@ -140,10 +141,14 @@ class FocusAudioDaemon:
             gen = self._job_gen
             self._status = "queued"
             self._error = None
-            self._last_session = {"session_id": session_id, "cwd": cwd}
+            self._last_session = {
+                "session_id": session_id,
+                "cwd": cwd,
+                "transcript_path": transcript_path or "",
+            }
         t = threading.Thread(
             target=self._run_session_job,
-            args=(gen, session_id, cwd, force, mode, after_live),
+            args=(gen, session_id, cwd, force, mode, after_live, transcript_path),
             daemon=True,
             name=f"focus-audio-job-{gen}",
         )
@@ -513,6 +518,7 @@ class FocusAudioDaemon:
         force: bool,
         mode: Optional[str],
         after_live: bool = False,
+        transcript_path: Optional[str] = None,
     ) -> None:
         try:
             if not self._still_current(gen):
@@ -524,22 +530,29 @@ class FocusAudioDaemon:
                 live_words = int(self._live_word_count or 0)
             # After-live recap is always a brief, never a second full read.
             job_mode = "brief" if after_live else mode
-            # Stop can fire slightly before chat_history is flushed — retry briefly.
+            # Prefer updates.jsonl (streamed mid-turn). History can lag Stop;
+            # short retries cover that fallback only.
             ready = None
             last_err: Optional[str] = None
-            for attempt in range(6):
+            for attempt in range(4):
                 if not self._still_current(gen):
                     return
                 try:
                     ready = resolve_from_session(
-                        session_id, self.cfg, cwd=cwd, mode=job_mode, force=force
+                        session_id,
+                        self.cfg,
+                        cwd=cwd,
+                        mode=job_mode,
+                        force=force,
+                        transcript_path=transcript_path,
                     )
                 except Exception as e:
                     last_err = str(e)
                     ready = None
                 if ready is not None:
                     break
-                time.sleep(0.25 * (attempt + 1))
+                # Backoff: 0.1s, 0.2s, 0.3s (was longer while waiting on history only).
+                time.sleep(0.1 * (attempt + 1))
             if not self._still_current(gen):
                 return
             if ready is None:
@@ -832,6 +845,8 @@ class FocusAudioDaemon:
                 msg.get("cwd"),
                 force=bool(msg.get("force")),
                 mode=msg.get("mode"),
+                transcript_path=msg.get("transcript_path")
+                or msg.get("transcriptPath"),
             )
         if cmd == "live_start":
             return self.live_start(
