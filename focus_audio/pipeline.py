@@ -374,10 +374,16 @@ def prepare_from_session(
     cwd: Optional[str] = None,
     mode: Optional[str] = None,
     force: bool = False,
+    transcript_path: Optional[str] = None,
 ) -> Optional[PreparedAudio]:
     from .transcript import load_turn
 
-    turn = load_turn(session_id, cwd=cwd, min_chars=cfg.min_chars)
+    turn = load_turn(
+        session_id,
+        cwd=cwd,
+        min_chars=cfg.min_chars,
+        transcript_path=transcript_path,
+    )
     if not turn:
         return None
     return prepare_audio(
@@ -396,12 +402,17 @@ def resolve_from_session(
     cwd: Optional[str] = None,
     mode: Optional[str] = None,
     force: bool = False,
+    transcript_path: Optional[str] = None,
 ) -> Optional[ScriptReady]:
     from .transcript import load_turn
 
     use_mode = (mode or cfg.mode or "brief").lower()
     turn = load_turn(
-        session_id, cwd=cwd, min_chars=cfg.min_chars, mode=use_mode
+        session_id,
+        cwd=cwd,
+        min_chars=cfg.min_chars,
+        mode=use_mode,
+        transcript_path=transcript_path,
     )
     if not turn:
         return None

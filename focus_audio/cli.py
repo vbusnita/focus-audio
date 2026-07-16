@@ -105,7 +105,7 @@ def _hook_log(msg: str) -> None:
 
 
 def _active_session_fallback(cwd: Optional[str] = None) -> Optional[str]:
-    """If hooks omit session id, pick from ~/.grok/active_sessions.json."""
+    """Last-resort: if hooks omit session id, pick from ~/.grok/active_sessions.json."""
     path = Path.home() / ".grok" / "active_sessions.json"
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -128,6 +128,60 @@ def _active_session_fallback(cwd: Optional[str] = None) -> Optional[str]:
             best_ts = ts
             best = str(entry["session_id"])
     return best
+
+
+# Grok Stop reasons that should auto-speak (from open-source turn completion).
+# Skip cancelled/error so we do not burn TTS on interrupted turns.
+_SKIP_STOP_REASONS = frozenset(
+    {
+        "cancelled",
+        "canceled",
+        "error",
+        "interrupted",
+        "max_turns",
+        "max_turns_reached",
+        "channel_closed",
+    }
+)
+_SPEAK_STOP_REASONS = frozenset(
+    {
+        "end_turn",
+        "completed",
+        "stop",
+        "success",
+    }
+)
+
+
+def _payload_transcript_path(payload: dict) -> str:
+    return str(
+        payload.get("transcriptPath")
+        or payload.get("transcript_path")
+        or ""
+    ).strip()
+
+
+def _payload_stop_reason(payload: dict) -> str:
+    return str(payload.get("reason") or "").strip().lower()
+
+
+def _should_auto_speak_stop(payload: dict, *, force: bool = False) -> bool:
+    """Whether Stop should enqueue speech.
+
+    Prefer ``end_turn`` only. Missing reason (manual CLI / older payloads) still
+    speaks. Known cancel/error reasons never auto-speak unless force.
+    """
+    if force:
+        return True
+    reason = _payload_stop_reason(payload)
+    if not reason:
+        return True
+    if reason in _SKIP_STOP_REASONS:
+        return False
+    if reason in _SPEAK_STOP_REASONS:
+        return True
+    # Unknown future reasons: speak (fail-open) rather than silently drop.
+    return True
 
 
 def _ensure_daemon() -> bool:
@@ -255,24 +309,58 @@ def cmd_release(args: argparse.Namespace) -> int:
 
 
 def _resolve_hook_session(args: argparse.Namespace, payload: dict) -> tuple:
-    """Return (session_id, cwd) from args/env/payload/fallbacks."""
-    session_id = (
+    """Return (session_id, cwd, transcript_path) — envelope-first.
+
+    Grok's hook runner always injects ``GROK_SESSION_ID`` and
+    ``GROK_WORKSPACE_ROOT`` for real hooks, and the stdin envelope carries
+    ``sessionId``, ``cwd``/``workspaceRoot``, and often ``transcriptPath``
+    (session ``updates.jsonl``). Prefer those over disk scans.
+    """
+    payload = payload if isinstance(payload, dict) else {}
+    transcript_path = _payload_transcript_path(payload)
+
+    session_id = str(
         getattr(args, "session_id", None)
         or os.environ.get("GROK_SESSION_ID")
         or os.environ.get("CLAUDE_SESSION_ID")
         or payload.get("sessionId")
         or payload.get("session_id")
         or ""
-    )
-    cwd = (
+    ).strip()
+    cwd = str(
         getattr(args, "cwd", None)
         or os.environ.get("GROK_WORKSPACE_ROOT")
         or os.environ.get("CLAUDE_PROJECT_DIR")
         or payload.get("workspaceRoot")
         or payload.get("cwd")
-        or os.getcwd()
-    )
+        or ""
+    ).strip()
 
+    # O(1) recovery from transcriptPath when session id was omitted.
+    if (not session_id or not cwd) and transcript_path:
+        try:
+            from .transcript import session_dir_from_transcript_path
+
+            sdir = session_dir_from_transcript_path(transcript_path)
+            if sdir is not None:
+                if not session_id and sdir.name:
+                    session_id = sdir.name
+                    _hook_log(f"session_id from transcriptPath: {session_id}")
+                if not cwd and sdir.parent is not None:
+                    # Parent dir name is URL-encoded cwd in Grok's layout.
+                    from urllib.parse import unquote
+
+                    decoded = unquote(sdir.parent.name)
+                    if decoded.startswith("/"):
+                        cwd = decoded
+                        _hook_log(f"cwd from transcriptPath parent: {cwd}")
+        except Exception as e:
+            _hook_log(f"transcriptPath resolve error: {e}")
+
+    if not cwd:
+        cwd = os.getcwd()
+
+    # Last-resort only — real Grok hooks should not need these.
     if not session_id:
         session_id = _active_session_fallback(cwd) or ""
         if session_id:
@@ -287,9 +375,12 @@ def _resolve_hook_session(args: argparse.Namespace, payload: dict) -> tuple:
                 newest = None
                 newest_m = 0.0
                 for child in group.iterdir():
-                    hist = child / "chat_history.jsonl"
-                    if child.is_dir() and hist.is_file():
-                        m = hist.stat().st_mtime
+                    # Prefer updates.jsonl (always present mid-turn) over history.
+                    marker = child / "updates.jsonl"
+                    if not marker.is_file():
+                        marker = child / "chat_history.jsonl"
+                    if child.is_dir() and marker.is_file():
+                        m = marker.stat().st_mtime
                         if m > newest_m:
                             newest_m = m
                             newest = child.name
@@ -299,7 +390,7 @@ def _resolve_hook_session(args: argparse.Namespace, payload: dict) -> tuple:
         except Exception as e:
             _hook_log(f"newest-session fallback error: {e}")
 
-    return str(session_id or ""), str(cwd or "")
+    return str(session_id or ""), str(cwd or ""), str(transcript_path or "")
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
@@ -312,13 +403,20 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         return 0
 
     payload = _read_hook_payload()
-    session_id, cwd = _resolve_hook_session(args, payload)
+    force = bool(getattr(args, "force", False))
+    if not _should_auto_speak_stop(payload, force=force):
+        reason = _payload_stop_reason(payload)
+        _hook_log(f"enqueue skipped: stop reason={reason!r} (not end_turn)")
+        return 0
+
+    session_id, cwd, transcript_path = _resolve_hook_session(args, payload)
 
     if not session_id:
         _hook_log(
             "enqueue skipped: no session_id "
             f"(env={bool(os.environ.get('GROK_SESSION_ID'))} "
-            f"payload_keys={list(payload.keys())} cwd={cwd})"
+            f"payload_keys={list(payload.keys())} cwd={cwd} "
+            f"transcriptPath={bool(transcript_path)})"
         )
         return 0
 
@@ -334,17 +432,20 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         return 0
 
     try:
-        resp = send_command(
-            {
-                "cmd": "enqueue",
-                "session_id": session_id,
-                "cwd": cwd,
-                "force": bool(args.force),
-                "mode": args.mode,
-            },
-            timeout=3.0,
+        msg = {
+            "cmd": "enqueue",
+            "session_id": session_id,
+            "cwd": cwd,
+            "force": force,
+            "mode": args.mode,
+        }
+        if transcript_path:
+            msg["transcript_path"] = transcript_path
+        resp = send_command(msg, timeout=3.0)
+        _hook_log(
+            f"enqueue ok session={session_id} reason={_payload_stop_reason(payload)!r} "
+            f"transcript={bool(transcript_path)} resp={resp}"
         )
-        _hook_log(f"enqueue ok session={session_id} resp={resp}")
         if args.verbose:
             print(json.dumps(resp))
     except Exception as e:
@@ -368,7 +469,7 @@ def cmd_live_start(args: argparse.Namespace) -> int:
         return 0
 
     payload = _read_hook_payload()
-    session_id, cwd = _resolve_hook_session(args, payload)
+    session_id, cwd, transcript_path = _resolve_hook_session(args, payload)
     if not session_id:
         _hook_log(
             "live-start skipped: no session_id "
@@ -386,14 +487,14 @@ def cmd_live_start(args: argparse.Namespace) -> int:
         return 0
 
     try:
-        resp = send_command(
-            {
-                "cmd": "live_start",
-                "session_id": session_id,
-                "cwd": cwd,
-            },
-            timeout=3.0,
-        )
+        msg = {
+            "cmd": "live_start",
+            "session_id": session_id,
+            "cwd": cwd,
+        }
+        if transcript_path:
+            msg["transcript_path"] = transcript_path
+        resp = send_command(msg, timeout=3.0)
         _hook_log(f"live-start ok session={session_id} resp={resp}")
         if getattr(args, "verbose", False):
             print(json.dumps(resp))

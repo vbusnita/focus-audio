@@ -302,8 +302,9 @@ def test_enqueue_after_live_bypasses_skip():
     assert out.get("job") is not None
     assert len(jobs) == 1
     # after_live is forwarded into the session job so it can skip redundant plays.
+    # args: (gen, session_id, cwd, force, mode, after_live, transcript_path)
     job_args = jobs[0]
-    assert job_args[-1] is True  # after_live flag
+    assert job_args[5] is True  # after_live flag
 
 
 def test_after_live_skips_when_brief_would_repeat_live():
