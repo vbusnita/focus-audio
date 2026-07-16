@@ -201,24 +201,38 @@ h3 {
 }
 
 /* —— features —— */
+/* Fixed 2×2 so four tiles stay balanced (auto-fit left Controls alone on row 2). */
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.85rem;
 }
 
 .grid article {
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 1.1rem 1.15rem;
+  min-height: 7.5rem;
 }
 
 .grid p {
   margin: 0;
   color: var(--dim);
   font-size: 0.95rem;
+}
+
+@media (max-width: 420px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .grid article {
+    min-height: 0;
+  }
 }
 
 /* —— media placeholders —— */
