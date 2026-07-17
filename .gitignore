@@ -1,4 +1,6 @@
 .DS_Store
-*.mov
-# keep intentional media/ videos if you commit small mp4s; large files stay out via Releases
 Thumbs.db
+*.mov
+# Local video rebuild artifacts (not site assets)
+media/hero.prev.mp4
+media/hero-keep-mask.png

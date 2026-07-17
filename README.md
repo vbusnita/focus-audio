@@ -1,43 +1,19 @@
-# Focus Audio — site branch
+# Focus Audio website
 
-Public showcase for [focus-audio](https://github.com/vbusnita/focus-audio).
+Static showcase (dark landing). Media placeholders only — add real Grok Build / doctor captures under `media/`.
 
-This is an **orphan `site` branch**: HTML only, no plugin source. Source of truth for install remains `main`’s README.
-
-## Enable GitHub Pages
-
-1. Repo **Settings → Pages**
-2. Source: **Deploy from a branch**
-3. Branch: **`site`** / folder **`/` (root)**
-4. Save → site at `https://vbusnita.github.io/focus-audio/`
-
-Optional: set that URL as the repo **Homepage** (About box).
-
-## Add your real media
-
-See [`media/README.md`](media/README.md). Do **not** commit AI mock screenshots here — use Grok Build TUI captures, QuickTime of a session, and a real `focus-audio doctor` terminal shot.
-
-## Local preview
+## Preview
 
 ```bash
-git checkout site
+cd website
 python3 -m http.server 8080
+# http://127.0.0.1:8080
 ```
 
-Open http://127.0.0.1:8080
+## GitHub Pages (later, not in this PR)
 
-## Updating the site
+Option A — orphan **`site`** branch (repo root = site): copy or rsync these files to `site` and enable Pages on branch `site` / root.
 
-```bash
-git checkout site
-# edit index.html / styles.css / media/*
-git add -A && git commit -m "…"
-git push origin site
-```
+Option B — Pages from **`main` / `website`**: needs a small workflow or Pages “folder” support; root `/docs` is the usual GitHub UI path.
 
-To rebuild the branch from scratch (rare):
-
-```bash
-git checkout --orphan site-new
-# copy only site files, commit, force-push as site
-```
+Do **not** enable Pages until media is ready.
