@@ -1,28 +1,31 @@
 # Media for the Focus Audio site
 
-Drop **real** captures here. The mock PNGs were discarded on purpose.
+Real captures used by `../index.html` (See it section).
 
-## Suggested files
+## Files
 
 | File | Content |
 |------|---------|
-| `hero.png` or `session.mp4` | Grok Build TUI / QuickTime of a real session with audio playing |
-| `hero-poster.png` | Optional poster frame if you use video |
-| `doctor.png` | Terminal screenshot of `focus-audio doctor` (overall OK) |
-| `hotkeys.png` | Optional hotkeys or in-session controls shot |
+| `hero.webm` | Preferred: VP9 + **alpha** exterior (no black plate behind the window) |
+| `hero.mp4` | Fallback: H.264, exterior painted page bg `#0a0a0c` (no alpha in MP4) |
+| `hero-poster.jpg` | First-frame poster, exterior exact page bg |
+| `doctor.png` | `focus-audio doctor` overall OK — exterior matches page bg |
+| `hotkeys.png` | Slash-commands overlay — exterior matches page bg |
+
+Source exports with a white canvas (`doctor.jpg`, `hotkeys.jpg`) may sit alongside the PNGs; the site uses the transparent PNGs only.
 
 ## Tips
 
 - Prefer dark mode captures that match Grok Build.
 - Crop out secrets, private paths, and API keys.
-- Keep video short (15–45s) and under GitHub’s soft limits; host large clips on GitHub Releases or a CDN if needed.
-- After adding files, edit `../index.html`: remove the matching `.placeholder` and uncomment the `<img>` / `<video>` blocks.
-- Set `og:image` in `index.html` once `hero.png` exists.
+- Export window shots on a **transparent** or pure-white canvas, then convert white → alpha for soft shadows.
+- Keep video under GitHub’s soft limits; host large clips on Releases or a CDN if needed.
+- `og:image` in `index.html` points at `doctor.png`.
 
 ## Local preview
 
 ```bash
-# from this site branch root
+# from website/
 python3 -m http.server 8080
 # open http://127.0.0.1:8080
 ```

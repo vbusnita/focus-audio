@@ -9,9 +9,7 @@
   <meta property="og:title" content="Focus Audio" />
   <meta property="og:description" content="Spoken focus briefs for Grok Build — your xAI key, hotkeys, MIT." />
   <meta property="og:type" content="website" />
-  <!-- Set after you add a real screenshot:
-  <meta property="og:image" content="https://vbusnita.github.io/focus-audio/media/hero.png" />
-  -->
+  <meta property="og:image" content="https://vbusnita.github.io/focus-audio/media/doctor.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -28,7 +26,7 @@
   <main>
     <section class="hero">
       <p class="eyebrow">Grok Build plugin · macOS · MIT</p>
-      <h1>Listen to your coding agent instead of reading every wall of text.</h1>
+      <h1>Listen to your coding agent.</h1>
       <p class="lede">
         Focus Audio speaks a short recap when a turn finishes — or mid-turn if you want live speech —
         using <strong>your</strong> xAI API key. Nothing is billed through this project.
@@ -64,42 +62,46 @@
     <section id="media" class="media">
       <h2>See it</h2>
       <p class="section-note">
-        Real captures go here — Grok Build TUI screenshots, QuickTime of a session, and
-        <code>focus-audio doctor</code>. Drop files into <code>media/</code> and wire the paths below.
+        A real session clip, a clean <code>focus-audio doctor</code> run, and the slash-command surface.
       </p>
 
       <div class="media-grid">
         <figure class="slot" data-slot="hero">
-          <div class="placeholder">
-            <span class="label">Hero</span>
-            <p>Grok Build TUI with a completed turn<br /><code>media/hero.png</code> or <code>.mp4</code></p>
-          </div>
-          <!-- Uncomment when ready:
-          <img src="media/hero.png" alt="Grok Build session with Focus Audio speaking" width="1600" height="1000" />
-          <video controls playsinline poster="media/hero-poster.png">
-            <source src="media/session.mp4" type="video/mp4" />
+          <video
+            controls
+            playsinline
+            preload="metadata"
+            poster="media/hero-poster.jpg"
+            width="2702"
+            height="1994"
+          >
+            <!-- WebM+alpha: true transparent exterior (no black plate). MP4 fallback paints --bg. -->
+            <source src="media/hero.webm" type="video/webm" />
+            <source src="media/hero.mp4" type="video/mp4" />
           </video>
-          -->
           <figcaption>Session in Grok Build</figcaption>
         </figure>
 
         <figure class="slot" data-slot="doctor">
-          <div class="placeholder">
-            <span class="label">Doctor</span>
-            <p>Terminal: <code>focus-audio doctor</code><br /><code>media/doctor.png</code></p>
-          </div>
-          <!-- Uncomment when ready:
-          <img src="media/doctor.png" alt="focus-audio doctor overall OK" width="1400" height="900" />
-          -->
+          <img
+            src="media/doctor.png"
+            alt="focus-audio doctor: overall OK with all checks passed"
+            width="2008"
+            height="1482"
+            loading="lazy"
+          />
           <figcaption>Health check</figcaption>
         </figure>
 
         <figure class="slot" data-slot="hotkeys">
-          <div class="placeholder">
-            <span class="label">Hotkeys</span>
-            <p>Optional: cheat sheet or in-session shot<br /><code>media/hotkeys.png</code></p>
-          </div>
-          <figcaption>Controls</figcaption>
+          <img
+            src="media/hotkeys.png"
+            alt="Focus Audio slash commands for play, skip, rebrief, mode, and live"
+            width="2008"
+            height="1482"
+            loading="lazy"
+          />
+          <figcaption>Slash commands</figcaption>
         </figure>
       </div>
 
