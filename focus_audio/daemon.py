@@ -87,17 +87,24 @@ class FocusAudioDaemon:
             skip_brief = bool(getattr(self.cfg, "live_skip_stop_brief", True))
             live_then = bool(getattr(self.cfg, "live_then_brief", False))
             live_spoken = int(self._live_spoken or 0)
+            live_status = self._status
             # Post-turn path uses cfg.mode (or explicit override).
             post_mode = (mode or self.cfg.mode or "brief").lower()
         live_pending = bool(live_q and (not live_q.closed or live_q.pending() > 0))
-        # Cover when live is still running OR has accepted/queued/spoken segments.
-        # Previously we required live_segs > 0 only after a full play-through, so
-        # Stop mid-first-message cancelled live and skipped later messages.
+        # Cover only when live has real work for this session — not bare
+        # live_active. A watcher that never accepted/spoke a segment used to
+        # return live_covered_* and silence the whole turn (no post-turn
+        # fallback). Mid-first-clip is covered via live_segs (on_accepted) or
+        # status live_playing / pending queue.
+        mid_live_play = live_status == "live_playing"
+        live_has_work = bool(
+            live_spoken > 0 or live_segs > 0 or live_pending or mid_live_play
+        )
         live_covers = bool(
             live_sid
             and session_id
             and live_sid == session_id
-            and (live_active or live_segs > 0 or live_pending)
+            and live_has_work
         )
         if not after_live and live_covers and skip_brief and not force:
             # Do not cancel live — drain the queue to the last word.

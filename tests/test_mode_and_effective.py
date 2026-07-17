@@ -196,14 +196,17 @@ def test_enqueue_live_covered_defers_when_live_then_brief():
     assert d._live_active is True  # must not cancel live
 
 
-def test_enqueue_live_covers_while_active_even_if_zero_spoken():
-    """Stop mid-first-message must not cancel live (segments counted only after play)."""
+def test_enqueue_live_covers_mid_first_clip_before_spoken():
+    """Stop mid-first-message must not cancel live once a segment is accepted."""
     d = FocusAudioDaemon(
         cfg=Config(mode="brief", live_verbatim=True, live_then_brief=True)
     )
     d._live_session_id = "s1"
-    d._live_segments = 0  # first clip still synthesizing / playing
+    # on_accepted bumps segments before play finishes; spoken stays 0 mid-clip.
+    d._live_segments = 1
+    d._live_spoken = 0
     d._live_active = True
+    d._status = "live_playing"
     scheduled: list = []
     d._schedule_after_live_brief = (  # type: ignore[method-assign]
         lambda sid, cwd: scheduled.append((sid, cwd))
@@ -216,6 +219,32 @@ def test_enqueue_live_covers_while_active_even_if_zero_spoken():
     assert d._live_active is True
     # No cancel path: job thread for post-turn brief must not start here.
     thr.assert_not_called()
+
+
+def test_enqueue_empty_live_watcher_falls_through_to_post_turn():
+    """Bare live_active with no accepted/spoken/pending must not silence the turn."""
+    d = FocusAudioDaemon(
+        cfg=Config(
+            mode="verbatim",
+            live_verbatim=True,
+            live_then_brief=False,
+            live_skip_stop_brief=True,
+        )
+    )
+    d._live_session_id = "s1"
+    d._live_segments = 0
+    d._live_spoken = 0
+    d._live_active = True
+    d._status = "live"
+    d._live_queue = None
+    with patch("focus_audio.daemon.threading.Thread") as thr:
+        out = d.enqueue_session("s1", "/tmp", force=False)
+    assert out.get("skipped") is None
+    assert out.get("deferred") is None
+    assert out.get("ok") is True
+    assert "job" in out
+    # Post-turn job thread starts (cancels empty live watcher).
+    thr.assert_called()
 
 
 def test_enqueue_live_covers_when_queue_has_pending():
