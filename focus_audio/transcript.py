@@ -41,6 +41,8 @@ MD_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 MD_LIST_ITEM_RE = re.compile(
     r"^[ \t]*(?:[-*+•▪▸►‣∙]|\d{1,3}[.)])\s+(.+?)\s*$"
 )
+# Markdown blockquotes: "> quote" / ">> nested" — strip markers, keep body.
+MD_BLOCKQUOTE_RE = re.compile(r"^[ \t]*>+[ \t]?(.*)$")
 # Markdown links: [label](url) — keep label only (URL already often replaced).
 MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 # Pipe table: header row + separator + body rows.
@@ -469,6 +471,14 @@ def _flatten_markdown(text: str) -> str:
                 lines_out.append(spoken)
             continue
 
+        bq = MD_BLOCKQUOTE_RE.match(line)
+        if bq:
+            # Keep quoted body; never leave ">" for expand_for_speech → "greater than".
+            inner = (bq.group(1) or "").strip()
+            if inner:
+                lines_out.append(inner)
+            continue
+
         lm = MD_LIST_ITEM_RE.match(line)
         if lm:
             spoken = _ensure_spoken_sentence(lm.group(1))
@@ -571,10 +581,19 @@ def expand_for_speech(text: str) -> str:
         out,
     )
 
+    # Cashtags / tickers ($SPCX, $TSLA, $BRK.B) before money amounts — bare "$"
+    # makes many TTS engines say "dollar sign" then spell letters.
+    out = re.sub(
+        r"\$([A-Za-z]{1,6}(?:\.[A-Za-z]{1,2})?)\b",
+        r"\1",
+        out,
+    )
     # Numbers with units / money / percent before stripping bare symbols.
     out = re.sub(r"\$(\d+(?:\.\d+)?)\b", r"\1 dollars", out)
     out = re.sub(r"\b(\d+(?:\.\d+)?)%", r"\1 percent", out)
     out = re.sub(r"\b(\d+(?:\.\d+)?)x\b", r"\1 times", out, flags=re.IGNORECASE)
+    # Residual lone "$" (not money, not cashtag) — silence rather than "dollar sign".
+    out = out.replace("$", " ")
 
     # @mentions and #tags (keep the token, drop the sigil as a spoken glyph).
     out = re.sub(r"@([A-Za-z][\w.-]{0,40})", r"at \1", out)

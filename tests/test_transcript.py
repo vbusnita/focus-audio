@@ -265,6 +265,36 @@ def test_expand_status_kv_money_percent():
     assert "50 percent" in low
 
 
+def test_expand_cashtags_drop_dollar_sigil():
+    """$SPCX must not become 'dollar sign S P C X'."""
+    out = expand_for_speech(
+        "Immediate market chatter followed (e.g. $SPCX reactions after the scrub)."
+    )
+    assert "$" not in out
+    assert "SPCX" in out
+    assert "dollar" not in out.lower()
+    # Money still works alongside cashtags.
+    both = expand_for_speech("$TSLA moved; costs $12.")
+    assert "TSLA" in both
+    assert "$" not in both
+    assert "12 dollars" in both.lower()
+
+
+def test_clean_blockquote_not_greater_than():
+    """Markdown '>' quotes must not TTS as 'greater than …'."""
+    src = """Latest update (just after midnight UTC).
+
+> "To be confident of a good flight, 2 Raptors will be removed and replaced. Most probable launch timing is early next week."
+
+Why it's the top story.
+"""
+    out = clean_for_audio(src, mode="verbatim")
+    low = out.lower()
+    assert "greater than" not in low
+    assert "to be confident of a good flight" in low
+    assert "raptors will be removed" in low
+
+
 def test_clean_symbols_end_to_end_verbatim():
     src = (
         "Use Ctrl+Shift+R after failure.\n"
