@@ -54,6 +54,8 @@ def test_clean_verbatim_keeps_language_placeholder():
     assert "code sample" in out.lower()
     assert "python" in out.lower()
     assert "lines of" not in out.lower()
+    # Terminal sentence (brackets would be stripped and glue to the next word).
+    assert "Code sample in python." in out
 
 
 def test_clean_shortens_long_urls():
@@ -117,6 +119,33 @@ def test_clean_verbatim_table_placeholder():
 """
     out = clean_for_audio(src, mode="verbatim")
     assert "table" in out.lower()
+    # Terminal sentence so TTS can pause (not bare "table summarized").
+    assert "Table summarized." in out
+
+
+def test_clean_table_placeholder_pauses_before_next_heading():
+    """Regression: table stand-in must not glue into the following title.
+
+    Live cache used to speak \"table summarized What people are saying\" as one
+    phrase because the placeholder lacked a period and newlines collapse.
+    """
+    src = """## How it's playing on X
+
+| Post | Note |
+|------|------|
+| A | B |
+| C | D |
+
+## What people are saying
+
+Teams are reviewing the issue.
+"""
+    out = clean_for_audio(src, mode="verbatim")
+    collapsed = " ".join(out.split())
+    assert "Table summarized. What people are saying." in collapsed
+    # Bare (no period) glue must not occur.
+    assert "table summarized What" not in collapsed
+    assert "Table summarized What" not in collapsed
 
 
 def test_clean_caps_long_file_lists():
@@ -234,6 +263,36 @@ def test_expand_status_kv_money_percent():
     assert "—" not in out
     assert "12 dollars" in low
     assert "50 percent" in low
+
+
+def test_expand_cashtags_drop_dollar_sigil():
+    """$SPCX must not become 'dollar sign S P C X'."""
+    out = expand_for_speech(
+        "Immediate market chatter followed (e.g. $SPCX reactions after the scrub)."
+    )
+    assert "$" not in out
+    assert "SPCX" in out
+    assert "dollar" not in out.lower()
+    # Money still works alongside cashtags.
+    both = expand_for_speech("$TSLA moved; costs $12.")
+    assert "TSLA" in both
+    assert "$" not in both
+    assert "12 dollars" in both.lower()
+
+
+def test_clean_blockquote_not_greater_than():
+    """Markdown '>' quotes must not TTS as 'greater than …'."""
+    src = """Latest update (just after midnight UTC).
+
+> "To be confident of a good flight, 2 Raptors will be removed and replaced. Most probable launch timing is early next week."
+
+Why it's the top story.
+"""
+    out = clean_for_audio(src, mode="verbatim")
+    low = out.lower()
+    assert "greater than" not in low
+    assert "to be confident of a good flight" in low
+    assert "raptors will be removed" in low
 
 
 def test_clean_symbols_end_to_end_verbatim():

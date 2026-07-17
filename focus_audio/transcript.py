@@ -41,6 +41,8 @@ MD_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 MD_LIST_ITEM_RE = re.compile(
     r"^[ \t]*(?:[-*+•▪▸►‣∙]|\d{1,3}[.)])\s+(.+?)\s*$"
 )
+# Markdown blockquotes: "> quote" / ">> nested" — strip markers, keep body.
+MD_BLOCKQUOTE_RE = re.compile(r"^[ \t]*>+[ \t]?(.*)$")
 # Markdown links: [label](url) — keep label only (URL already often replaced).
 MD_LINK_RE = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 # Pipe table: header row + separator + body rows.
@@ -330,15 +332,20 @@ def path_basename(path: str) -> str:
 
 
 def _fence_placeholder(lang: str, mode: str) -> str:
-    """Short speakable stand-in for a fenced code block (no line counts)."""
+    """Short speakable stand-in for a fenced code block (no line counts).
+
+    Always a terminal sentence (period). Bracketed forms like ``[code sample]``
+    are wrong here: ``expand_for_speech`` strips ``[]`` and leaves bare words
+    that glue onto the next heading when newlines collapse for TTS.
+    """
     lang_tok = (lang or "").strip().split()[0] if (lang or "").strip() else ""
     # Common fence labels that aren't languages
     if lang_tok.lower() in ("", "code", "text", "txt", "plain"):
-        return "\n" if mode == "brief" else "\n[code sample]\n"
+        return "\n" if mode == "brief" else "\nCode sample.\n"
     if mode == "brief":
         # Prefer silence over "N lines of X" — brief LLM should describe purpose.
         return "\n"
-    return f"\n[code sample in {lang_tok}]\n"
+    return f"\nCode sample in {lang_tok}.\n"
 
 
 def _replace_code_fences(text: str, mode: str) -> str:
@@ -408,7 +415,14 @@ def _replace_inline_code(text: str) -> str:
 
 
 def _collapse_markdown_tables(text: str, mode: str) -> str:
-    placeholder = "\n" if mode == "brief" else "\n[table summarized]\n"
+    """Drop pipe tables; verbatim keeps a one-sentence stand-in with a period.
+
+    Without terminal punctuation the next heading rides the same TTS breath
+    (e.g. \"table summarized What people are saying\").
+    """
+    # Brief: silence (LLM / surrounding prose covers structure).
+    # Verbatim: full sentence so TTS pauses before the following title/body.
+    placeholder = "\n\n" if mode == "brief" else "\nTable summarized.\n"
     return MD_TABLE_BLOCK_RE.sub(placeholder, text)
 
 
@@ -455,6 +469,14 @@ def _flatten_markdown(text: str) -> str:
             spoken = _ensure_spoken_sentence(hm.group(2))
             if spoken:
                 lines_out.append(spoken)
+            continue
+
+        bq = MD_BLOCKQUOTE_RE.match(line)
+        if bq:
+            # Keep quoted body; never leave ">" for expand_for_speech → "greater than".
+            inner = (bq.group(1) or "").strip()
+            if inner:
+                lines_out.append(inner)
             continue
 
         lm = MD_LIST_ITEM_RE.match(line)
@@ -559,10 +581,19 @@ def expand_for_speech(text: str) -> str:
         out,
     )
 
+    # Cashtags / tickers ($SPCX, $TSLA, $BRK.B) before money amounts — bare "$"
+    # makes many TTS engines say "dollar sign" then spell letters.
+    out = re.sub(
+        r"\$([A-Za-z]{1,6}(?:\.[A-Za-z]{1,2})?)\b",
+        r"\1",
+        out,
+    )
     # Numbers with units / money / percent before stripping bare symbols.
     out = re.sub(r"\$(\d+(?:\.\d+)?)\b", r"\1 dollars", out)
     out = re.sub(r"\b(\d+(?:\.\d+)?)%", r"\1 percent", out)
     out = re.sub(r"\b(\d+(?:\.\d+)?)x\b", r"\1 times", out, flags=re.IGNORECASE)
+    # Residual lone "$" (not money, not cashtag) — silence rather than "dollar sign".
+    out = out.replace("$", " ")
 
     # @mentions and #tags (keep the token, drop the sigil as a spoken glyph).
     out = re.sub(r"@([A-Za-z][\w.-]{0,40})", r"at \1", out)
@@ -664,8 +695,9 @@ def clean_for_audio(text: str, mode: str = "brief") -> str:
 
     Mode-aware:
     - brief: drop code bodies and tables aggressively (no line counts).
-    - verbatim: keep short placeholders (\"code sample in python\") so structure
-      survives without reading dumps.
+    - verbatim: keep short terminal-sentence placeholders (\"Code sample in
+      python.\", \"Table summarized.\") so structure survives without reading
+      dumps and TTS can pause before the next heading.
 
     Always strips agent routing banners when present (before other transforms)
     so live and post-turn speech do not read that bookkeeping aloud.
