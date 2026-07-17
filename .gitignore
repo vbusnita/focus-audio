@@ -32,3 +32,7 @@ htmlcov/
 *.log
 *.mp3
 *.sock
+
+# Local video rebuild artifacts (not site assets)
+website/media/hero.prev.mp4
+website/media/hero-keep-mask.png

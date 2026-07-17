@@ -235,73 +235,71 @@ h3 {
   }
 }
 
-/* —— media placeholders —— */
+/* —— media (See it) —— */
+/* Transparent frames: assets carry their own window chrome + soft shadow.
+   Full-width stack so doctor / slash-command shots stay legible (not half-width). */
 
 .media-grid {
   display: grid;
-  gap: 1.25rem;
+  grid-template-columns: 1fr;
+  gap: 2.25rem;
 }
 
 .slot {
   margin: 0;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  overflow: hidden;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  overflow: visible;
 }
 
 .slot figcaption {
-  padding: 0.65rem 1rem;
+  padding: 0.7rem 0.25rem 0;
   font-size: 0.88rem;
   color: var(--muted);
-  border-top: 1px solid var(--border);
-}
-
-.placeholder {
-  min-height: 12rem;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  border-top: none;
   text-align: center;
-  padding: 2rem 1.25rem;
-  background:
-    linear-gradient(180deg, var(--panel-2) 0%, var(--panel) 100%);
-  border-bottom: 1px dashed var(--border);
+  background: transparent;
 }
 
-.placeholder .label {
-  display: inline-block;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--green);
-  margin-bottom: 0.65rem;
-}
-
-.placeholder p {
-  margin: 0;
-  color: var(--dim);
-  font-size: 0.95rem;
-  line-height: 1.5;
-}
-
-.placeholder code {
-  font-size: 0.82em;
-  color: var(--muted);
-}
-
-.slot img,
-.slot video {
+.slot img {
   display: block;
   width: 100%;
   height: auto;
   vertical-align: middle;
-  background: #000;
+  background: transparent;
+  border-radius: 12px;
+  /* Depth without a solid white/gray panel behind the shot.
+     Safe on PNGs whose exterior matches --bg so the shadow reads as window depth. */
+  filter: drop-shadow(0 14px 32px rgba(0, 0, 0, 0.45));
 }
 
-/* when real media is wired, hide placeholder by removing it from HTML */
+/*
+  Hero video:
+  - Prefer WebM (VP9 + alpha): exterior is truly transparent so the page shows
+    through the rounded window — no black plate.
+  - MP4 fallback: no alpha; exterior pixels are painted --bg.
+  Never put filter:drop-shadow on the <video> itself: on opaque MP4 the shadow
+  follows the full rectangle and reads as a black card behind the terminal.
+*/
+.slot video {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: none;
+  vertical-align: middle;
+  object-fit: contain;
+  background: transparent;
+  border: none;
+  border-radius: 16px;
+  filter: none;
+  box-shadow: none;
+}
+
+.slot[data-slot="hero"] {
+  background: transparent;
+  overflow: visible;
+}
 
 .hotkeys-list {
   margin-top: 1.75rem;
