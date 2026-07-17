@@ -54,6 +54,8 @@ def test_clean_verbatim_keeps_language_placeholder():
     assert "code sample" in out.lower()
     assert "python" in out.lower()
     assert "lines of" not in out.lower()
+    # Terminal sentence (brackets would be stripped and glue to the next word).
+    assert "Code sample in python." in out
 
 
 def test_clean_shortens_long_urls():
@@ -117,6 +119,33 @@ def test_clean_verbatim_table_placeholder():
 """
     out = clean_for_audio(src, mode="verbatim")
     assert "table" in out.lower()
+    # Terminal sentence so TTS can pause (not bare "table summarized").
+    assert "Table summarized." in out
+
+
+def test_clean_table_placeholder_pauses_before_next_heading():
+    """Regression: table stand-in must not glue into the following title.
+
+    Live cache used to speak \"table summarized What people are saying\" as one
+    phrase because the placeholder lacked a period and newlines collapse.
+    """
+    src = """## How it's playing on X
+
+| Post | Note |
+|------|------|
+| A | B |
+| C | D |
+
+## What people are saying
+
+Teams are reviewing the issue.
+"""
+    out = clean_for_audio(src, mode="verbatim")
+    collapsed = " ".join(out.split())
+    assert "Table summarized. What people are saying." in collapsed
+    # Bare (no period) glue must not occur.
+    assert "table summarized What" not in collapsed
+    assert "Table summarized What" not in collapsed
 
 
 def test_clean_caps_long_file_lists():
