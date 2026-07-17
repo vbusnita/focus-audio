@@ -4,3 +4,6 @@ Thumbs.db
 # Local video rebuild artifacts (not site assets)
 media/hero.prev.mp4
 media/hero-keep-mask.png
+
+__pycache__/
+*.pyc
