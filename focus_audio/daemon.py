@@ -838,6 +838,73 @@ class FocusAudioDaemon:
             return self.enqueue_text(src, force=False)
         return {"ok": False, "error": "nothing to rebrief"}
 
+    def _last_audio_path(self) -> Optional[Path]:
+        """Canonical path of the last prepared clip, if the file still exists."""
+        with self._lock:
+            prep = self._last_prepared
+        if prep is None:
+            return None
+        path = Path(prep.entry.audio_path)
+        return path if path.is_file() else None
+
+    def _salvage_stream_chunks(self) -> Optional[Path]:
+        """If skip cancelled mid-stream, stitch leftover ``.cN.mp3`` parts into the cache path.
+
+        The job thread also tries this, but skip returns immediately — do it
+        synchronously so toggle/restart never see a missing current file.
+        """
+        with self._lock:
+            prep = self._last_prepared
+        if prep is None:
+            return None
+        full = Path(prep.entry.audio_path)
+        if full.is_file():
+            return full
+        key = prep.entry.key
+        parent = full.parent
+        parts = sorted(parent.glob(f"{key}.c*.mp3"))
+        parts = [p for p in parts if p.is_file()]
+        if not parts:
+            return None
+        try:
+            if len(parts) == 1:
+                sole = parts[0]
+                if sole.resolve() != full.resolve():
+                    full.write_bytes(sole.read_bytes())
+            else:
+                from .tts import concat_mp3
+
+                concat_mp3(parts, full)
+            return full if full.is_file() else None
+        except Exception as e:
+            print(f"focus-audio salvage chunks failed: {e}", file=sys.stderr)
+            # Last resort: keep the newest playable part
+            for p in reversed(parts):
+                if p.is_file():
+                    return p
+            return None
+
+    def _ensure_playable_current(self) -> None:
+        """If player.current is missing (deleted stream chunk), re-point at last clip."""
+        cur = self.player.current
+        if cur is not None and Path(cur).is_file():
+            return
+        last = self._last_audio_path() or self._salvage_stream_chunks()
+        if last is not None:
+            self.player.set_current(last)
+
+    def _play_last_clip(self) -> bool:
+        """Play last prepared audio from the start. Used after skip leaves idle."""
+        last = self._last_audio_path() or self._salvage_stream_chunks()
+        if last is None:
+            return False
+        try:
+            self.player.play(last)
+            return True
+        except Exception as e:
+            print(f"focus-audio play last clip failed: {e}", file=sys.stderr)
+            return False
+
     # ----- controls -----
 
     def handle(self, msg: Dict[str, Any]) -> Dict[str, Any]:
@@ -880,17 +947,26 @@ class FocusAudioDaemon:
                 self._status = "paused"
             return {"ok": True, "status": "paused"}
         if cmd == "resume":
+            self._ensure_playable_current()
             ok = self.player.resume()
             with self._lock:
                 self._status = "playing" if ok else self._status
             return {"ok": ok, "status": "playing" if ok else "idle"}
         if cmd == "toggle":
+            self._ensure_playable_current()
             state = self.player.toggle()
+            # After skip mid-stream, toggle used to return idle (chunk deleted).
+            # Fall back to last full clip so play/pause keeps working.
+            if state == "idle" and self._play_last_clip():
+                state = "playing"
             with self._lock:
                 self._status = state if state != "idle" else self._status
             return {"ok": True, "status": state}
         if cmd == "restart":
+            self._ensure_playable_current()
             ok = self.player.restart()
+            if not ok:
+                ok = self._play_last_clip()
             with self._lock:
                 if ok:
                     self._status = "playing"
@@ -901,6 +977,8 @@ class FocusAudioDaemon:
             self._cancel_post_live()
             self._cancel_live()
             self.player.stop()
+            # Re-point player at last salvaged/full clip (chunks may be gone)
+            self._ensure_playable_current()
             with self._lock:
                 self._status = "idle"
             return {"ok": True, "status": "idle"}
