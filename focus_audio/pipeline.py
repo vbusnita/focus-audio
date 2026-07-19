@@ -329,7 +329,26 @@ def stream_synthesize_and_play(
         finally:
             _cleanup_parts(finished, entry.audio_path)
     else:
-        # Cancelled or empty — drop partial segment files.
+        # Cancelled (skip) mid-stream: chunks are deleted next. Salvage what we
+        # have into the cache path so play/pause + restart still work.
+        if finished:
+            try:
+                existing = [p for p in finished if p.is_file()]
+                if existing:
+                    if len(existing) == 1:
+                        sole = existing[0]
+                        if sole.resolve() != entry.audio_path.resolve():
+                            entry.audio_path.write_bytes(sole.read_bytes())
+                    else:
+                        concat_mp3(existing, entry.audio_path)
+                    if entry.audio_path.is_file():
+                        if hasattr(player, "set_current"):
+                            player.set_current(entry.audio_path)
+                        else:
+                            player._current = entry.audio_path  # noqa: SLF001
+            except Exception:
+                # Best-effort — leave player current alone if salvage fails.
+                pass
         _cleanup_parts(finished, entry.audio_path)
         if not finished and still_current():
             raise RuntimeError("TTS produced no audio chunks")
