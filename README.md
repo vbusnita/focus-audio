@@ -57,7 +57,7 @@ You need **macOS**, **Grok Build**, **Python 3.9+**, and an **xAI API key** (spe
 
 ### A. Install the plugin
 
-**Option 1 — Grok Marketplace (easiest when listed)**
+**Option 1 — Grok Marketplace (easiest, not yet listed)**
 
 1. In Grok Build, open **Plugins / Marketplace** (`/marketplace` or `/plugins`).
 2. Find **focus-audio** → **Install** → **Trust** when prompted (hooks need trust).
