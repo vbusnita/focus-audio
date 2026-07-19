@@ -120,17 +120,36 @@
 
     <section id="install" class="install">
       <h2>Install</h2>
-      <p>About five minutes. Full steps and privacy notes live in the repo README.</p>
+      <p>About five minutes on macOS. Speech uses <strong>your</strong> xAI API key.</p>
+
+      <h3>1. Plugin</h3>
+      <p><strong>Marketplace:</strong> in Grok, open Plugins / Marketplace → install <code>focus-audio</code> → Trust → start a <strong>new</strong> session.</p>
+      <p><strong>Or from GitHub:</strong></p>
       <pre class="code"><code>git clone https://github.com/vbusnita/focus-audio.git
 cd focus-audio
 chmod +x bin/focus-audio
-grok plugin install . --trust
-focus-audio doctor</code></pre>
+grok plugin install . --trust</code></pre>
+
+      <h3>2. Create an API key</h3>
+      <ol>
+        <li>Sign in or create an account at <a href="https://console.x.ai/">console.x.ai</a></li>
+        <li>Add credits if needed</li>
+        <li><a href="https://console.x.ai/team/default/api-keys">Create an API key</a> and copy it once</li>
+      </ol>
+      <p class="hint">Grok Build login alone is not enough — Focus Audio needs a Console API key for text-to-speech.</p>
+
+      <h3>3. Store the key (Keychain)</h3>
+      <pre class="code"><code>security add-generic-password -a "$USER" -s "xai-api-key" -w "paste-your-key-here"</code></pre>
+      <p>Or for one terminal session: <code>export XAI_API_KEY="xai-…"</code></p>
+
+      <h3>4. Verify</h3>
+      <pre class="code"><code>focus-audio doctor
+echo "Hello from Focus Audio." | focus-audio speak -</code></pre>
+
       <p>
-        Add your xAI API key (Keychain service <code>xai-api-key</code> or <code>XAI_API_KEY</code>).
-        Open a <strong>new</strong> Grok Build session so hooks load.
+        Full privacy notes and troubleshooting:
+        <a class="btn primary" href="https://github.com/vbusnita/focus-audio#install-about-five-minutes">README install guide →</a>
       </p>
-      <a class="btn primary" href="https://github.com/vbusnita/focus-audio#install-about-five-minutes">Full install guide →</a>
     </section>
 
     <section class="privacy">

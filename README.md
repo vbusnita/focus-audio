@@ -27,7 +27,7 @@ Audio problems never block Grok. If Focus Audio fails, coding continues.
 1. **macOS** (primary platform today)
 2. **[Grok Build](https://docs.x.ai/build/overview)** installed and working ([product page](https://x.ai))
 3. **Python 3.9+** (`python3` on your PATH)
-4. An **xAI account** with an [API key](https://console.x.ai/team/default/api-keys) (see [Quickstart](https://docs.x.ai/developers/quickstart)), a positive balance in the [xAI Cloud Console](https://console.x.ai/), and access to [Text to Speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech)
+4. An **xAI Console API key** (not the same as “I can chat with Grok”). You need a [Console](https://console.x.ai/) account, a positive balance, and access to [Text to Speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech). Step-by-step: **Install → B** below.
 
 > Tip: `focus-audio doctor` can look fine while speech fails if the key is set but credits are empty or TTS is not enabled for your account. Check the [xAI Cloud Console](https://console.x.ai/) and the [TTS docs](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech) if you hear nothing.
 
@@ -53,7 +53,17 @@ Focus Audio’s defaults point at `https://api.x.ai/v1` ([chat completions](http
 
 ## Install (about five minutes)
 
-### 1. Clone and install the plugin
+You need **macOS**, **Grok Build**, **Python 3.9+**, and an **xAI API key** (speech is billed to *your* account — this plugin does not ship a key).
+
+### A. Install the plugin
+
+**Option 1 — Grok Marketplace (easiest when listed)**
+
+1. In Grok Build, open **Plugins / Marketplace** (`/marketplace` or `/plugins`).
+2. Find **focus-audio** → **Install** → **Trust** when prompted (hooks need trust).
+3. Start a **new** Grok session so hooks load.
+
+**Option 2 — From GitHub**
 
 ```bash
 git clone https://github.com/vbusnita/focus-audio.git
@@ -69,44 +79,63 @@ Optional — put the CLI on your PATH:
 
 ```bash
 mkdir -p ~/.local/bin
+
+# If you cloned:
 ln -sf "$(pwd)/bin/focus-audio" ~/.local/bin/focus-audio
+
+# If you only used the marketplace, the binary lives under Grok’s plugin folder, e.g.:
+#   ~/.grok/plugins/…/focus-audio/bin/focus-audio
+# Symlink that path, or run doctor/speak via the full path.
 ```
 
-### 2. Add your xAI API key
+### B. Get an xAI API key (first time)
 
-Create a key on the [API Keys page](https://console.x.ai/team/default/api-keys) (walkthrough: [Quickstart → Generate an API key](https://docs.x.ai/developers/quickstart#step-2-generate-an-api-key)). Focus Audio **never** saves the key into its own config file, cache, or logs.
+Grok Build login and the **API Console** are related, but Focus Audio needs a **Console API key** so it can call text-to-speech.
 
-**Recommended (macOS Keychain):**
+1. Open the [xAI Cloud Console](https://console.x.ai/) and **sign in or create an account**  
+   (if you’ve never used the Console, this is the step most people miss).
+2. Confirm you have **credits / a positive balance** (speech fails if the key is valid but the account can’t bill).
+3. Open **[API Keys](https://console.x.ai/team/default/api-keys)** → **Create** a key → **copy it once**  
+   (you usually can’t view the full secret again).
+4. Optional: skim [Text to Speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech) and [Pricing](https://docs.x.ai/developers/pricing).
+
+More detail: [Developer Quickstart → Generate an API key](https://docs.x.ai/developers/quickstart#step-2-generate-an-api-key).
+
+### C. Give Focus Audio the key (Mac)
+
+Focus Audio **never** writes the key into its config, cache, or logs. Pick one:
+
+**Recommended — save in Keychain (once):**
 
 ```bash
 security add-generic-password -a "$USER" -s "xai-api-key" -w "paste-your-key-here"
 ```
 
-**Or** for the current terminal session:
+Replace `paste-your-key-here` with the key from the Console (starts with something like `xai-…`).  
+If macOS says the item already exists, delete the old one in **Keychain Access** (search `xai-api-key`) or:
+
+```bash
+security delete-generic-password -a "$USER" -s "xai-api-key"
+# then re-run add-generic-password
+```
+
+**Or — this terminal only:**
 
 ```bash
 export XAI_API_KEY="xai-…"
 ```
 
-### 3. Check the install
+(Must be available to the environment that runs Grok / the Focus Audio daemon.)
+
+### D. Check and hear something
 
 ```bash
 focus-audio doctor
 ```
 
-You want overall **OK**, and `api_key: present…`. The doctor never prints the secret.
+You want overall **OK** and **api key present** (the doctor never prints the secret).
 
-### 4. Optional: global hotkeys
-
-```bash
-pip3 install --user pynput
-```
-
-Then: **System Settings → Privacy & Security → Accessibility** → allow the Terminal (or Python) app that runs Grok.
-
-### 5. Start a new Grok session
-
-Open a **new** Grok Build session so hooks load. If Grok was already open:
+If Grok was already open before install:
 
 ```bash
 focus-audio ensure -v
@@ -127,7 +156,20 @@ Use `--no-play` if you only want to exercise synthesis (still uses API credit; s
 echo "We fixed login and added tests. Next deploy staging." | focus-audio speak - --no-play
 ```
 
+Then use Grok normally: after a successful turn, you should get a short spoken brief.
+
+### E. Optional: global hotkeys
+
+```bash
+pip3 install --user pynput
+```
+
+Then: **System Settings → Privacy & Security → Accessibility** → allow the Terminal (or Python) app that runs Grok.
+
 ### Update later
+
+- **Marketplace:** update from Grok’s plugin UI when a new version ships.
+- **Git install:**
 
 ```bash
 cd focus-audio && git pull
