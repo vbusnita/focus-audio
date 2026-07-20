@@ -92,23 +92,83 @@ def _check_api_key() -> Check:
     cfg = ensure_default_config()
     present = bool(cfg.api_key())
     source = cfg.api_key_source()
+    provider = cfg.effective_tts_provider()
+    configured = cfg.normalize_tts_provider()
+    # Free default: macOS TTS needs no key. Smart brief is only on the xAI path.
+    if provider == "macos":
+        if present:
+            detail = (
+                f"present via {source} but unused for speech "
+                f"(tts={provider}, config={configured}; "
+                'set tts_provider = "xai" for cloud voice + smart brief)'
+            )
+        else:
+            detail = (
+                f"not required — free macOS speech "
+                f"(tts={provider}, config={configured}; no smart brief on this path)"
+            )
+        return Check(
+            id="api_key",
+            ok=True,
+            level="ok",
+            detail=detail,
+            fix=(
+                'Opt-in cloud path: focus-audio config --tts-provider xai '
+                "(needs Console API key + credits)"
+            ),
+        )
     if present:
         return Check(
             id="api_key",
             ok=True,
             level="ok",
-            detail=f"present via {source}",
+            detail=f"present via {source} (tts={provider}, config={configured})",
         )
     return Check(
         id="api_key",
         ok=False,
         level="fail",
-        detail="missing (never stored in Focus Audio config)",
+        detail="missing (required for xAI TTS / smart brief; never stored in Focus Audio config)",
         fix=(
             "Set your own xAI key: export XAI_API_KEY=… "
             "or macOS Keychain service `xai-api-key` for account $USER "
-            '(security add-generic-password -a "$USER" -s "xai-api-key" -w "…")'
+            '(security add-generic-password -a "$USER" -s "xai-api-key" -w "…"). '
+            "Or stay free: focus-audio config --tts-provider macos"
         ),
+    )
+
+
+def _check_tts_backend() -> Check:
+    cfg = ensure_default_config()
+    provider = cfg.effective_tts_provider()
+    configured = cfg.normalize_tts_provider()
+    voice = cfg.effective_voice_id()
+    if provider == "macos":
+        say = shutil.which("say") or (
+            "/usr/bin/say" if Path("/usr/bin/say").is_file() else None
+        )
+        if say:
+            return Check(
+                id="tts",
+                ok=True,
+                level="ok",
+                detail=f"macos say ({say}); voice={voice}; config={configured}",
+            )
+        return Check(
+            id="tts",
+            ok=False,
+            level="fail",
+            detail="macos provider selected but `say` not found",
+            fix="Install Xcode CLT or switch: focus-audio config --tts-provider xai",
+        )
+    return Check(
+        id="tts",
+        ok=True,
+        level="ok",
+        detail=f"xAI /v1/tts; voice={voice}; config={configured}",
+        fix=None
+        if cfg.api_key()
+        else "API key missing — doctor api_key check should fail until set",
     )
 
 
@@ -119,6 +179,7 @@ def _check_config() -> Check:
         f"path={path}",
         f"enabled={cfg.enabled}",
         f"mode={cfg.mode}",
+        f"tts_provider={cfg.normalize_tts_provider()}→{cfg.effective_tts_provider()}",
         f"live_verbatim={cfg.live_verbatim}",
         f"autoplay={cfg.autoplay}",
     ]
@@ -278,6 +339,7 @@ def run_doctor(*, plugin_root: Optional[Path] = None) -> DoctorReport:
         _check_data_dir(),
         _check_runtime_perms(),
         _check_api_key(),
+        _check_tts_backend(),
         _check_config(),
         _check_sessions_dir(),
         _check_player_tools(),

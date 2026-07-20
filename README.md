@@ -2,7 +2,11 @@
 
 **Listen to your coding agent instead of reading every wall of text.**
 
-Focus Audio is a plugin for [Grok Build](https://docs.x.ai/build/overview) (macOS). When the agent finishes a turn—or while it is still writing, if you turn that on—it speaks a short summary (or a cleaned full read) using **your own** [xAI API key](https://console.x.ai/team/default/api-keys). Nothing is billed through this project; you pay xAI the same way you would for any other API use.
+Focus Audio is a plugin for [Grok Build](https://docs.x.ai/build/overview) (macOS). When the agent finishes a turn—or while it is still writing, if you turn that on—it reads the reply aloud.
+
+**Free by default.** Out of the box it uses **macOS system speech** (`say`) — no API key, no credits, no account for Focus Audio itself. You hear a cleaned **verbatim** read of the turn (and optional live mid-turn speech). There is **no smart brief rewrite** on the free path: brief mode needs the optional cloud stack.
+
+**Optional cloud (opt-in):** if you want a neural voice (e.g. Ara) and a short **smart brief** instead of the full read, set `tts_provider = "xai"` and use **your own** [xAI Console API key](https://console.x.ai/team/default/api-keys). Nothing is billed through this project; only *your* xAI account is charged when you choose that path.
 
 If you already use Grok in the terminal and want to keep working with your ears free, this is for you. If you only want a general “read this page aloud” button, this is probably more than you need.
 
@@ -12,11 +16,11 @@ If you already use Grok in the terminal and want to keep working with your ears 
 
 | Mode | What you hear |
 |------|----------------|
-| **Brief** (default) | A short spoken recap: what happened, what changed, what to do next (roughly under two minutes) |
-| **Verbatim** | The full reply, cleaned up for speech (big code blocks become short placeholders) |
-| **Live** (optional) | Chunks of the agent’s message **while the turn is still running** |
+| **Verbatim** (default) | The full reply, cleaned up for speech (big code blocks become short placeholders). Works fully on free macOS speech. |
+| **Brief** | A short spoken recap (what happened, what changed, next step). **Smart brief requires the xAI path** (`tts_provider = "xai"` + API key). On free macOS, “brief” is only a short offline excerpt, not the cloud rewrite. |
+| **Live** (optional) | Chunks of the agent’s message **while the turn is still running** (works with free or cloud TTS). |
 
-You also get play/pause/skip, a master on/off switch, optional keyboard shortcuts, and a small local cache so restarting the same clip does not call the API again.
+You also get play/pause/skip, a master on/off switch, optional keyboard shortcuts, and a small local cache so restarting the same clip does not re-synth.
 
 Audio problems never block Grok. If Focus Audio fails, coding continues.
 
@@ -27,9 +31,10 @@ Audio problems never block Grok. If Focus Audio fails, coding continues.
 1. **macOS** (primary platform today)
 2. **[Grok Build](https://docs.x.ai/build/overview)** installed and working ([product page](https://x.ai))
 3. **Python 3.9+** (`python3` on your PATH)
-4. An **xAI Console API key** (not the same as “I can chat with Grok”). You need a [Console](https://console.x.ai/) account, a positive balance, and access to [Text to Speech](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech). Step-by-step: **Install → B** below.
+4. **Speech** — free macOS `say` is the default. No key required.
+5. **Optional:** an **xAI Console API key** only if you opt into cloud voice + smart brief (`tts_provider = "xai"`). Not the same as “I can chat with Grok.” Needs [TTS access](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech) and credits. Step-by-step: **Install → B** below.
 
-> Tip: `focus-audio doctor` can look fine while speech fails if the key is set but credits are empty or TTS is not enabled for your account. Check the [xAI Cloud Console](https://console.x.ai/) and the [TTS docs](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech) if you hear nothing.
+> Tip: `focus-audio doctor` shows free vs cloud. If you opted into xAI and hear nothing, check credits / TTS access in the [xAI Cloud Console](https://console.x.ai/).
 
 ### Official xAI docs (handy bookmarks)
 
@@ -53,7 +58,7 @@ Focus Audio’s defaults point at `https://api.x.ai/v1` ([chat completions](http
 
 ## Install (about five minutes)
 
-You need **macOS**, **Grok Build**, **Python 3.9+**, and an **xAI API key** (speech is billed to *your* account — this plugin does not ship a key).
+You need **macOS**, **Grok Build**, and **Python 3.9+**. That’s enough for free speech. An **xAI API key** is only for the optional cloud path.
 
 ### A. Install the plugin
 
@@ -88,9 +93,23 @@ ln -sf "$(pwd)/bin/focus-audio" ~/.local/bin/focus-audio
 # Symlink that path, or run doctor/speak via the full path.
 ```
 
-### B. Get an xAI API key (first time)
+### B. Speech: free by default, cloud optional
 
-Grok Build login and the **API Console** are related, but Focus Audio needs a **Console API key** so it can call text-to-speech.
+**Default (free)** — already on after install: `tts_provider = "macos"`, `mode = "verbatim"`. Uses system speech (often Samantha). No API key. **No smart brief** on this path.
+
+```bash
+focus-audio doctor   # should show free macOS speech
+# optional: pick a system voice (list with: say -v '?')
+# focus-audio config --macos-voice Samantha
+```
+
+**Opt-in cloud** — neural voice + **smart brief** rewrite. Grok Build login and the **API Console** are related, but Focus Audio needs a **Console API key** for xAI TTS / brief:
+
+```bash
+focus-audio config --tts-provider xai --mode brief
+```
+
+Then:
 
 1. Open the [xAI Cloud Console](https://console.x.ai/) and **sign in or create an account**  
    (if you’ve never used the Console, this is the step most people miss).
@@ -133,7 +152,7 @@ export XAI_API_KEY="xai-…"
 focus-audio doctor
 ```
 
-You want overall **OK** and **api key present** (the doctor never prints the secret).
+You want overall **OK**. On the free path, **api_key** is optional (“not required — free macOS speech”) and **tts** should show `macos say`. On the cloud path, api key should be present (the doctor never prints the secret).
 
 If Grok was already open before install:
 
@@ -144,19 +163,19 @@ focus-audio status
 
 In Grok, run `/hooks` and confirm **focus-audio** is listed. You may need `/hooks-trust` once.
 
-**Quick smoke test** — speaks a sample line. This hits the TTS API and uses a small amount of API credit:
+**Quick smoke test** — speaks a sample line (free with macOS TTS; uses a little credit with xAI):
 
 ```bash
 echo "We fixed login and added tests. Next deploy staging." | focus-audio speak -
 ```
 
-Use `--no-play` if you only want to exercise synthesis (still uses API credit; skips local playback):
+Use `--no-play` if you only want to exercise synthesis (skips local playback):
 
 ```bash
 echo "We fixed login and added tests. Next deploy staging." | focus-audio speak - --no-play
 ```
 
-Then use Grok normally: after a successful turn, you should get a short spoken brief.
+Then use Grok normally: after a successful turn, you should hear speech (brief when using the cloud rewrite; cleaned verbatim / offline excerpt on the free path).
 
 ### E. Optional: global hotkeys
 
@@ -329,10 +348,12 @@ All options live in `~/.grok/focus-audio/config.toml` (created on first run). **
 
 ```toml
 enabled = true
-voice_id = "ara"
+tts_provider = "macos"      # macos (default, free) | xai (opt-in) | auto
+macos_voice = ""            # say -v name; empty = system default
+voice_id = "ara"            # xAI voice when tts_provider is xai
 speed = 1.1
 language = "en"
-mode = "brief"              # brief | verbatim
+mode = "verbatim"           # default; smart brief only on tts_provider = xai
 autoplay = true
 min_chars = 80
 max_brief_words = 220
@@ -354,11 +375,12 @@ live_then_brief = false   # set true only if you want a recap *after* live
 Change settings from the CLI without editing the file by hand. Examples:
 
 ```bash
-focus-audio config --voice ara
-focus-audio config --speed 1.2
-focus-audio config --mode brief
-focus-audio config --live false
 focus-audio config --show
+focus-audio config --macos-voice Samantha
+# opt-in cloud:
+focus-audio config --tts-provider xai --mode brief --voice ara
+focus-audio config --speed 1.2
+focus-audio config --live false
 ```
 
 ---

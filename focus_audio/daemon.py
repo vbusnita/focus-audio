@@ -232,12 +232,22 @@ class FocusAudioDaemon:
         }
 
     def _cancel_live(self) -> None:
-        """Hard-cancel: abort producer, drop queue, mark inactive (caller stops player)."""
+        """Hard-cancel: abort producer, drop queue, mark inactive (caller stops player).
+
+        Also clear live coverage counters / session. Otherwise a mid-turn interrupt
+        (CLI ``speak`` sample, skip, new job) leaves ``live_spoken > 0`` and Stop
+        returns ``live_covered_verbatim`` — silencing the real end-of-turn speech.
+        Natural live completion does not call this; it keeps counters for skip logic.
+        """
         with self._lock:
             self._live_gen += 1
             self._live_active = False
             live_q = self._live_queue
             self._live_queue = None
+            self._live_session_id = None
+            self._live_segments = 0
+            self._live_spoken = 0
+            self._live_word_count = 0
         if live_q is not None:
             live_q.clear()
 
@@ -714,10 +724,13 @@ class FocusAudioDaemon:
     def _announce_mode(self, mode: str) -> None:
         """Speak a short 'Brief mode' / 'Verbatim mode' cue (cached TTS, say fallback)."""
         phrase = "Brief mode." if mode == "brief" else "Verbatim mode."
+        provider = self.cfg.effective_tts_provider()
+        voice = self.cfg.effective_voice_id()
+        ext = self.cfg.audio_suffix()
         cache = (
             data_dir()
             / "announce"
-            / f"{self.cfg.voice_id}_{self.cfg.speed}_{mode}.mp3"
+            / f"{provider}_{voice}_{self.cfg.speed}_{mode}{ext}"
         )
         played = False
         if not cache.is_file():
@@ -1042,7 +1055,11 @@ class FocusAudioDaemon:
                 ),
             },
             "config": {
+                "tts_provider": self.cfg.normalize_tts_provider(),
+                "tts_provider_effective": self.cfg.effective_tts_provider(),
                 "voice_id": self.cfg.voice_id,
+                "macos_voice": getattr(self.cfg, "macos_voice", "") or "",
+                "effective_voice_id": self.cfg.effective_voice_id(),
                 "speed": self.cfg.speed,
                 "autoplay": self.cfg.autoplay,
                 "enabled": self.cfg.enabled,

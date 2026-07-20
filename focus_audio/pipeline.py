@@ -58,8 +58,23 @@ def resolve_script(
     # Live mode uses a distinct cache namespace so post-turn briefs stay separate.
     cache_mode = f"{use_mode}+live" if skip_llm and use_mode == "verbatim" else use_mode
 
+    provider = cfg.effective_tts_provider()
+    voice = cfg.effective_voice_id()
+    audio_suffix = cfg.audio_suffix()
+    # Free path: no API key → never call the brief rewrite model.
+    if not cfg.uses_cloud_brief():
+        skip_llm = True
+
     if not force:
-        hit = lookup(cleaned, cache_mode, cfg.voice_id, cfg.speed, cfg.model)
+        hit = lookup(
+            cleaned,
+            cache_mode,
+            voice,
+            cfg.speed,
+            cfg.model,
+            provider,
+            audio_suffix=audio_suffix,
+        )
         if hit:
             script = hit.script_path.read_text(encoding="utf-8")
             _write_last_brief(script, cache_mode, from_cache=True)
@@ -71,8 +86,8 @@ def resolve_script(
                 cleaned=cleaned,
             )
 
-    key = cache_key(cleaned, cache_mode, cfg.voice_id, cfg.speed, cfg.model)
-    ent = entry_for(key, cache_mode, len(cleaned))
+    key = cache_key(cleaned, cache_mode, voice, cfg.speed, cfg.model, provider)
+    ent = entry_for(key, cache_mode, len(cleaned), audio_suffix=audio_suffix)
 
     brief_err: Optional[str] = None
     brief_skipped = skip_llm or brief_mod.should_skip_llm(cleaned, cfg, use_mode)
@@ -157,6 +172,9 @@ def prepare_audio(
 
 
 def _chunk_list(script: str, cfg: Config) -> List[str]:
+    # macOS say is local and fast enough as one shot; AIFF parts are not mp3-concatable.
+    if cfg.effective_tts_provider() == "macos":
+        return [script]
     if not getattr(cfg, "chunk_tts", True):
         return [script]
     return brief_mod.split_for_tts(
@@ -167,7 +185,7 @@ def _chunk_list(script: str, cfg: Config) -> List[str]:
 
 
 def _synthesize_full(script: str, entry: CacheEntry, cfg: Config) -> Path:
-    """Synthesize all chunks (if any) and write the final cached mp3."""
+    """Synthesize all chunks (if any) and write the final cached audio file."""
     chunks = _chunk_list(script, cfg)
     if len(chunks) <= 1:
         return synthesize_speech(script, entry.audio_path, cfg)

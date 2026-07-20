@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Focus Audio — Spoken briefs for Grok Build</title>
-  <meta name="description" content="Listen to your coding agent. Focus Audio speaks brief, verbatim, or live mid-turn audio for Grok Build using your own xAI API key." />
+  <title>Focus Audio — Free spoken Grok Build on macOS</title>
+  <meta name="description" content="Listen to your coding agent. Free macOS speech by default — no credits. Optional xAI voice and smart brief if you bring your own key." />
   <meta name="theme-color" content="#0a0a0c" />
   <meta property="og:title" content="Focus Audio" />
-  <meta property="og:description" content="Spoken focus briefs for Grok Build — your xAI key, hotkeys." />
+  <meta property="og:description" content="Free macOS speech for Grok Build by default. Optional xAI voice + smart brief." />
   <meta property="og:type" content="website" />
   <meta property="og:image" content="https://vbusnita.github.io/focus-audio/media/doctor.png" />
   <link rel="stylesheet" href="styles.css" />
@@ -28,8 +28,9 @@
       <p class="eyebrow">Grok Build plugin · macOS</p>
       <h1>Listen to your coding agent.</h1>
       <p class="lede">
-        Focus Audio speaks a short recap when a turn finishes — or mid-turn if you want live speech —
-        using <strong>your</strong> xAI API key. Nothing is billed through this project.
+        Free by default: macOS system speech reads the turn aloud (verbatim, optional live mid-turn) —
+        <strong>no API key, no credits</strong>. Opt into xAI only if you want a neural voice and a smart brief.
+        Nothing is billed through this project.
       </p>
       <div class="actions">
         <a class="btn primary" href="https://github.com/vbusnita/focus-audio#install-about-five-minutes">Get started</a>
@@ -41,20 +42,20 @@
       <h2>What you get</h2>
       <div class="grid">
         <article>
-          <h3>Brief</h3>
-          <p>Default short recap: what happened, what changed, what to do next.</p>
+          <h3>Free by default</h3>
+          <p>macOS <code>say</code> out of the box. No Console key required for speech.</p>
         </article>
         <article>
           <h3>Verbatim</h3>
-          <p>Full reply cleaned for speech. Big code blocks become short placeholders.</p>
+          <p>Default full reply cleaned for speech. Big code blocks become short placeholders.</p>
         </article>
         <article>
-          <h3>Live</h3>
-          <p>Optional mid-turn speech while the agent is still writing.</p>
+          <h3>Optional cloud</h3>
+          <p>Bring your xAI key for a neural voice and smart brief rewrite. Opt-in only.</p>
         </article>
         <article>
-          <h3>Controls</h3>
-          <p>Play/pause, skip, rebrief, mode toggle — hotkeys or slash commands.</p>
+          <h3>Live + controls</h3>
+          <p>Mid-turn speech, play/pause, skip, mode toggle — hotkeys or slash commands.</p>
         </article>
       </div>
     </section>
@@ -120,7 +121,7 @@
 
     <section id="install" class="install">
       <h2>Install</h2>
-      <p>About five minutes on macOS. Speech uses <strong>your</strong> xAI API key.</p>
+      <p>About five minutes on macOS. Free speech works with no API key. Cloud voice is optional.</p>
 
       <h3>1. Plugin</h3>
       <p><strong>Marketplace (easiest, not yet listed):</strong> once it appears in Grok’s Plugins / Marketplace, install <code>focus-audio</code> → Trust → start a <strong>new</strong> session. Until then, use GitHub below.</p>
@@ -130,21 +131,20 @@ cd focus-audio
 chmod +x bin/focus-audio
 grok plugin install . --trust</code></pre>
 
-      <h3>2. Create an API key</h3>
+      <h3>2. Verify (free path)</h3>
+      <pre class="code"><code>focus-audio doctor
+echo "Hello from Focus Audio." | focus-audio speak -</code></pre>
+      <p class="hint">Doctor should report free macOS speech. No smart brief on this path — you hear cleaned verbatim (default).</p>
+
+      <h3>3. Optional: cloud voice + smart brief</h3>
       <ol>
         <li>Sign in or create an account at <a href="https://console.x.ai/">console.x.ai</a></li>
         <li>Add credits if needed</li>
         <li><a href="https://console.x.ai/team/default/api-keys">Create an API key</a> and copy it once</li>
+        <li>Store it: <code>security add-generic-password -a "$USER" -s "xai-api-key" -w "…"</code></li>
+        <li>Opt in: <code>focus-audio config --tts-provider xai --mode brief</code></li>
       </ol>
-      <p class="hint">Grok Build login alone is not enough — Focus Audio needs a Console API key for text-to-speech.</p>
-
-      <h3>3. Store the key (Keychain)</h3>
-      <pre class="code"><code>security add-generic-password -a "$USER" -s "xai-api-key" -w "paste-your-key-here"</code></pre>
-      <p>Or for one terminal session: <code>export XAI_API_KEY="xai-…"</code></p>
-
-      <h3>4. Verify</h3>
-      <pre class="code"><code>focus-audio doctor
-echo "Hello from Focus Audio." | focus-audio speak -</code></pre>
+      <p class="hint">Grok Build login alone is not enough for the cloud path — you need a Console API key for text-to-speech.</p>
 
       <p>
         Full privacy notes and troubleshooting:
@@ -153,11 +153,11 @@ echo "Hello from Focus Audio." | focus-audio speak -</code></pre>
     </section>
 
     <section class="privacy">
-      <h2>Your key. Your machine.</h2>
+      <h2>Free on your Mac. Cloud only if you opt in.</h2>
       <p>
-        Speech and brief rewrite call xAI with <strong>your</strong> key.
-        Focus Audio does not ship a shared key or send analytics to the author.
-        Prefer brief over live+verbatim when you want less raw text leaving the Mac.
+        Default speech stays on-device via macOS <code>say</code>.
+        Only if you set <code>tts_provider = "xai"</code> do speech and smart brief rewrite call xAI with
+        <strong>your</strong> key. Focus Audio does not ship a shared key or send analytics to the author.
       </p>
       <a href="https://github.com/vbusnita/focus-audio/blob/main/SECURITY.md">SECURITY.md</a>
     </section>
