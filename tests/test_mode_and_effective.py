@@ -310,6 +310,48 @@ def test_enqueue_live_covered_skips_post_when_mode_verbatim():
     assert d._live_active is True
 
 
+def test_mid_turn_speak_clears_live_so_stop_can_speak():
+    """CLI sample speak hard-cancels live; Stop must not stay silenced by stale coverage."""
+    d = FocusAudioDaemon(
+        cfg=Config(
+            mode="verbatim",
+            live_verbatim=True,
+            live_skip_stop_brief=True,
+            live_then_brief=False,
+        )
+    )
+    d._live_session_id = "s1"
+    d._live_segments = 2
+    d._live_spoken = 1
+    d._live_word_count = 40
+    d._live_active = True
+    d._live_queue = MagicMock()
+
+    jobs: list = []
+
+    def fake_thread(*args, **kwargs):
+        jobs.append(kwargs.get("args") or args)
+        m = MagicMock()
+        m.start = MagicMock()
+        return m
+
+    with patch("focus_audio.daemon.threading.Thread", side_effect=fake_thread):
+        speak_out = d.enqueue_text("sample voice check only", force=True)
+
+    assert speak_out.get("ok") is True
+    assert d._live_active is False
+    assert d._live_session_id is None
+    assert d._live_segments == 0
+    assert d._live_spoken == 0
+
+    with patch("focus_audio.daemon.threading.Thread", side_effect=fake_thread):
+        stop_out = d.enqueue_session("s1", force=False)
+
+    assert "skipped" not in stop_out
+    assert stop_out.get("ok") is True
+    assert stop_out.get("job") is not None
+
+
 def test_enqueue_after_live_bypasses_skip():
     d = FocusAudioDaemon(
         cfg=Config(mode="brief", live_verbatim=True, live_then_brief=True)

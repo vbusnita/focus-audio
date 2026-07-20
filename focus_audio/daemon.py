@@ -232,12 +232,22 @@ class FocusAudioDaemon:
         }
 
     def _cancel_live(self) -> None:
-        """Hard-cancel: abort producer, drop queue, mark inactive (caller stops player)."""
+        """Hard-cancel: abort producer, drop queue, mark inactive (caller stops player).
+
+        Also clear live coverage counters / session. Otherwise a mid-turn interrupt
+        (CLI ``speak`` sample, skip, new job) leaves ``live_spoken > 0`` and Stop
+        returns ``live_covered_verbatim`` — silencing the real end-of-turn speech.
+        Natural live completion does not call this; it keeps counters for skip logic.
+        """
         with self._lock:
             self._live_gen += 1
             self._live_active = False
             live_q = self._live_queue
             self._live_queue = None
+            self._live_session_id = None
+            self._live_segments = 0
+            self._live_spoken = 0
+            self._live_word_count = 0
         if live_q is not None:
             live_q.clear()
 
