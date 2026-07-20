@@ -151,7 +151,8 @@ def test_cache_key_stable():
 
 def test_config_defaults():
     cfg = Config()
-    assert cfg.mode == "brief"
+    assert cfg.mode == "verbatim"
+    assert cfg.tts_provider == "macos"
     assert cfg.autoplay is True
-    assert cfg.toggle_mode() == "verbatim"
     assert cfg.toggle_mode() == "brief"
+    assert cfg.toggle_mode() == "verbatim"

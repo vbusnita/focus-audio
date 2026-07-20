@@ -19,7 +19,9 @@ def test_config_live_then_brief_default():
     # Off by default so live does not also play a post-turn brief (double speak).
     assert cfg.live_then_brief is False
     assert cfg.live_skip_stop_brief is True
-    assert cfg.mode == "brief"
+    # Free packaging: verbatim + macOS by default (smart brief is xAI opt-in).
+    assert cfg.mode == "verbatim"
+    assert cfg.tts_provider == "macos"
 
 
 def test_effective_label_plain_modes():

@@ -55,9 +55,23 @@ def test_effective_provider_force_macos_even_with_key(monkeypatch):
     monkeypatch.setattr(cfg, "api_key", lambda: "xai-test")
     assert cfg.effective_tts_provider() == "macos"
     assert cfg.effective_voice_id() == "Samantha"
-    # Brief rewrite can still use the key when present.
-    assert cfg.uses_cloud_brief() is True
+    # Free macOS path: key is ignored for speech and smart brief.
+    assert cfg.uses_cloud_brief() is False
     assert cfg.uses_cloud_tts() is False
+
+
+def test_defaults_are_free_macos_verbatim():
+    cfg = Config()
+    assert cfg.tts_provider == "macos"
+    assert cfg.mode == "verbatim"
+    assert cfg.effective_tts_provider() == "macos"
+
+
+def test_cloud_brief_only_on_xai_with_key(monkeypatch):
+    cfg = Config(tts_provider="xai")
+    monkeypatch.setattr(cfg, "api_key", lambda: "xai-test")
+    assert cfg.uses_cloud_brief() is True
+    assert cfg.uses_cloud_tts() is True
 
 
 def test_normalize_aliases():

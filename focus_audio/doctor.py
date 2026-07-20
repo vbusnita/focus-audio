@@ -94,6 +94,29 @@ def _check_api_key() -> Check:
     source = cfg.api_key_source()
     provider = cfg.effective_tts_provider()
     configured = cfg.normalize_tts_provider()
+    # Free default: macOS TTS needs no key. Smart brief is only on the xAI path.
+    if provider == "macos":
+        if present:
+            detail = (
+                f"present via {source} but unused for speech "
+                f"(tts={provider}, config={configured}; "
+                'set tts_provider = "xai" for cloud voice + smart brief)'
+            )
+        else:
+            detail = (
+                f"not required — free macOS speech "
+                f"(tts={provider}, config={configured}; no smart brief on this path)"
+            )
+        return Check(
+            id="api_key",
+            ok=True,
+            level="ok",
+            detail=detail,
+            fix=(
+                'Opt-in cloud path: focus-audio config --tts-provider xai '
+                "(needs Console API key + credits)"
+            ),
+        )
     if present:
         return Check(
             id="api_key",
@@ -101,31 +124,16 @@ def _check_api_key() -> Check:
             level="ok",
             detail=f"present via {source} (tts={provider}, config={configured})",
         )
-    # Free path: macOS TTS needs no key. Brief rewrite still needs a key if you want cloud briefs.
-    if provider == "macos":
-        return Check(
-            id="api_key",
-            ok=True,
-            level="ok",
-            detail=(
-                f"not set — free macOS TTS active "
-                f"(tts={provider}, config={configured}; brief rewrite stays offline)"
-            ),
-            fix=(
-                "Optional for neural voice / smart brief: set XAI_API_KEY or Keychain "
-                "`xai-api-key`, or set tts_provider = \"xai\""
-            ),
-        )
     return Check(
         id="api_key",
         ok=False,
         level="fail",
-        detail="missing (required for xAI TTS; never stored in Focus Audio config)",
+        detail="missing (required for xAI TTS / smart brief; never stored in Focus Audio config)",
         fix=(
             "Set your own xAI key: export XAI_API_KEY=… "
             "or macOS Keychain service `xai-api-key` for account $USER "
             '(security add-generic-password -a "$USER" -s "xai-api-key" -w "…"). '
-            'Or use free local speech: focus-audio config --tts-provider macos'
+            "Or stay free: focus-audio config --tts-provider macos"
         ),
     )
 

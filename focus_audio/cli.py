@@ -982,7 +982,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--tts-provider",
         dest="tts_provider",
         default=None,
-        help="auto|xai|macos — auto uses free macOS say when no API key",
+        help="macos (default, free) | xai (cloud voice + smart brief) | auto",
     )
     c.add_argument(
         "--macos-voice",

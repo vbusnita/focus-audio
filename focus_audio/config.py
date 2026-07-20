@@ -11,24 +11,25 @@ from typing import Any, Dict, Optional
 from .paths import config_path, secure_write_text
 
 
-# tts_provider: auto | xai | macos
-#   auto  — xAI TTS when an API key is present, else free macOS `say`
-#   xai   — always xAI /v1/tts (requires key + credits)
-#   macos — always system Speech Synthesis (`say`); no TTS credits
+# tts_provider: macos | xai | auto
+#   macos — free system Speech Synthesis (`say`); default (no credits)
+#   xai   — xAI /v1/tts + smart brief rewrite (opt-in; needs key + credits)
+#   auto  — xAI when an API key is present, else macOS
 TTS_PROVIDERS = ("auto", "xai", "macos")
 
 DEFAULTS: Dict[str, Any] = {
     "enabled": True,
-    # Speech backend. auto = free local path without a key; xAI when key exists.
-    "tts_provider": "auto",
-    # Single global xAI TTS voice today. Future: per-session / per-agent voices so
-    # parallel agents are distinguishable by ear (see README → Future improvements).
+    # Free by default. Cloud neural voice is opt-in via tts_provider = "xai".
+    "tts_provider": "macos",
+    # Single global xAI TTS voice (only used when tts_provider is xai/auto→xai).
+    # Future: per-session / per-agent voices (see README → Future improvements).
     "voice_id": "ara",
     # macOS `say -v` name when tts_provider resolves to macos. Empty = system default.
     "macos_voice": "",
     "speed": 1.1,
     "language": "en",
-    "mode": "brief",  # brief | verbatim
+    # Verbatim pairs with free macOS speech. Smart brief rewrite is xAI-only.
+    "mode": "verbatim",  # brief | verbatim
     "autoplay": True,
     "min_chars": 80,
     "max_brief_words": 220,
@@ -62,12 +63,12 @@ DEFAULTS: Dict[str, Any] = {
 @dataclass
 class Config:
     enabled: bool = True
-    tts_provider: str = "auto"
+    tts_provider: str = "macos"
     voice_id: str = "ara"
     macos_voice: str = ""
     speed: float = 1.1
     language: str = "en"
-    mode: str = "brief"
+    mode: str = "verbatim"
     autoplay: bool = True
     min_chars: int = 80
     max_brief_words: int = 220
@@ -133,8 +134,12 @@ class Config:
         return ".aiff" if self.effective_tts_provider() == "macos" else ".mp3"
 
     def uses_cloud_brief(self) -> bool:
-        """True when the chat rewrite can call xAI (needs API key)."""
-        return bool(self.api_key())
+        """True when smart brief rewrite is available (xAI TTS path + API key).
+
+        Free macOS speech has no cloud brief — scripts stay offline (clean /
+        excerpt). Opt into ``tts_provider = "xai"`` for neural voice + brief.
+        """
+        return self.effective_tts_provider() == "xai" and bool(self.api_key())
 
     def uses_cloud_tts(self) -> bool:
         return self.effective_tts_provider() == "xai"
@@ -178,8 +183,8 @@ def _load_toml_flat(path: Path) -> Dict[str, Any]:
 def _dump_toml_flat(data: Dict[str, Any]) -> str:
     lines = [
         "# Focus Audio config — edit freely; restart daemon to pick up most changes.",
-        "# mode: brief | verbatim  (Ctrl+Shift+M re-speaks last turn in the new mode)",
-        "# tts_provider: auto | xai | macos  (auto = xAI when key present, else free say)",
+        "# tts_provider: macos (default, free) | xai (opt-in cloud) | auto (xAI if key else macos)",
+        "# mode: verbatim (default) | brief  — smart brief rewrite only when tts_provider is xai",
         "# macos_voice: system voice name for say -v (empty = system default); list: say -v '?'",
         "# live_verbatim: mid-turn speech",
         "# live_then_brief: after live, also play mode (opt-in second pass; off by default)",
