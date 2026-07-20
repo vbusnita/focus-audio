@@ -24,12 +24,21 @@ class CacheEntry:
 
 
 # Bump when synthesis layout / defaults change so old clips are not reused.
-CACHE_VERSION = "v2-chunk"
+CACHE_VERSION = "v3-provider"
 
 
-def cache_key(source: str, mode: str, voice_id: str, speed: float, model: str) -> str:
+def cache_key(
+    source: str,
+    mode: str,
+    voice_id: str,
+    speed: float,
+    model: str,
+    provider: str = "xai",
+) -> str:
     h = hashlib.sha256()
     h.update(CACHE_VERSION.encode())
+    h.update(b"|")
+    h.update((provider or "xai").encode())
     h.update(b"|")
     h.update(mode.encode())
     h.update(b"|")
@@ -43,13 +52,20 @@ def cache_key(source: str, mode: str, voice_id: str, speed: float, model: str) -
     return h.hexdigest()[:24]
 
 
-def entry_for(key: str, mode: str, source_chars: int) -> CacheEntry:
+def entry_for(
+    key: str,
+    mode: str,
+    source_chars: int,
+    *,
+    audio_suffix: str = ".mp3",
+) -> CacheEntry:
     base = cache_dir() / key
+    suffix = audio_suffix if audio_suffix.startswith(".") else f".{audio_suffix}"
     return CacheEntry(
         key=key,
         mode=mode,
         script_path=base.with_suffix(".txt"),
-        audio_path=base.with_suffix(".mp3"),
+        audio_path=base.with_suffix(suffix),
         source_chars=source_chars,
     )
 
@@ -60,9 +76,12 @@ def lookup(
     voice_id: str,
     speed: float,
     model: str,
+    provider: str = "xai",
+    *,
+    audio_suffix: str = ".mp3",
 ) -> Optional[CacheEntry]:
-    key = cache_key(source, mode, voice_id, speed, model)
-    ent = entry_for(key, mode, len(source))
+    key = cache_key(source, mode, voice_id, speed, model, provider)
+    ent = entry_for(key, mode, len(source), audio_suffix=audio_suffix)
     if ent.exists():
         return ent
     return None

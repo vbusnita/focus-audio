@@ -11,11 +11,21 @@ from typing import Any, Dict, Optional
 from .paths import config_path, secure_write_text
 
 
+# tts_provider: auto | xai | macos
+#   auto  — xAI TTS when an API key is present, else free macOS `say`
+#   xai   — always xAI /v1/tts (requires key + credits)
+#   macos — always system Speech Synthesis (`say`); no TTS credits
+TTS_PROVIDERS = ("auto", "xai", "macos")
+
 DEFAULTS: Dict[str, Any] = {
     "enabled": True,
-    # Single global TTS voice today. Future: per-session / per-agent voices so
+    # Speech backend. auto = free local path without a key; xAI when key exists.
+    "tts_provider": "auto",
+    # Single global xAI TTS voice today. Future: per-session / per-agent voices so
     # parallel agents are distinguishable by ear (see README → Future improvements).
     "voice_id": "ara",
+    # macOS `say -v` name when tts_provider resolves to macos. Empty = system default.
+    "macos_voice": "",
     "speed": 1.1,
     "language": "en",
     "mode": "brief",  # brief | verbatim
@@ -25,6 +35,7 @@ DEFAULTS: Dict[str, Any] = {
     # Skip chat rewrite when cleaned source is already this short (words).
     "skip_brief_words": 80,
     # Stream TTS: synth first chunk ASAP, play while remaining chunks generate.
+    # (macOS `say` always synthesizes the full script in one shot.)
     "chunk_tts": True,
     "first_chunk_words": 35,
     "chunk_words": 90,
@@ -51,7 +62,9 @@ DEFAULTS: Dict[str, Any] = {
 @dataclass
 class Config:
     enabled: bool = True
+    tts_provider: str = "auto"
     voice_id: str = "ara"
+    macos_voice: str = ""
     speed: float = 1.1
     language: str = "en"
     mode: str = "brief"
@@ -88,6 +101,43 @@ class Config:
     def toggle_mode(self) -> str:
         self.mode = "verbatim" if self.mode == "brief" else "brief"
         return self.mode
+
+    def normalize_tts_provider(self) -> str:
+        """Return configured provider token (auto|xai|macos), defaulting unknown to auto."""
+        raw = (self.tts_provider or "auto").strip().lower()
+        if raw in ("say", "local", "system", "os"):
+            return "macos"
+        if raw in TTS_PROVIDERS:
+            return raw
+        return "auto"
+
+    def effective_tts_provider(self) -> str:
+        """Resolved speech backend: always ``xai`` or ``macos`` (never ``auto``)."""
+        p = self.normalize_tts_provider()
+        if p == "macos":
+            return "macos"
+        if p == "xai":
+            return "xai"
+        # auto
+        return "xai" if self.api_key() else "macos"
+
+    def effective_voice_id(self) -> str:
+        """Voice id used for TTS + cache keys for the resolved provider."""
+        if self.effective_tts_provider() == "macos":
+            v = (self.macos_voice or "").strip()
+            return v if v else "system"
+        return self.voice_id or "ara"
+
+    def audio_suffix(self) -> str:
+        """Cache file extension for the resolved TTS backend."""
+        return ".aiff" if self.effective_tts_provider() == "macos" else ".mp3"
+
+    def uses_cloud_brief(self) -> bool:
+        """True when the chat rewrite can call xAI (needs API key)."""
+        return bool(self.api_key())
+
+    def uses_cloud_tts(self) -> bool:
+        return self.effective_tts_provider() == "xai"
 
 
 def _parse_value(raw: str) -> Any:
@@ -129,6 +179,8 @@ def _dump_toml_flat(data: Dict[str, Any]) -> str:
     lines = [
         "# Focus Audio config — edit freely; restart daemon to pick up most changes.",
         "# mode: brief | verbatim  (Ctrl+Shift+M re-speaks last turn in the new mode)",
+        "# tts_provider: auto | xai | macos  (auto = xAI when key present, else free say)",
+        "# macos_voice: system voice name for say -v (empty = system default); list: say -v '?'",
         "# live_verbatim: mid-turn speech",
         "# live_then_brief: after live, also play mode (opt-in second pass; off by default)",
         "",

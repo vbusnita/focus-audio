@@ -1,7 +1,7 @@
 {
   "name": "focus-audio",
-  "version": "0.4.7",
-  "description": "Smart focus audio for Grok Build \u2014 spoken focus briefs via your xAI key, live mid-turn speech, master on/off, global hotkeys, and /audio skills.",
+  "version": "0.5.0",
+  "description": "Smart focus audio for Grok Build \u2014 free macOS say TTS or xAI voice, spoken briefs, live mid-turn speech, master on/off, global hotkeys, and /audio skills.",
   "author": {
     "name": "vbusnita"
   },

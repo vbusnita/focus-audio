@@ -728,10 +728,14 @@ def cmd_config(args: argparse.Namespace) -> int:
             args.live is not None,
             getattr(args, "live_then_brief", None) is not None,
             getattr(args, "enabled", None) is not None,
+            getattr(args, "tts_provider", None) is not None,
+            getattr(args, "macos_voice", None) is not None,
         ]
     ):
         print(f"config: {config_path()}")
         print(json.dumps(_public_config_dict(cfg), indent=2))
+        print(f"tts_provider_effective: {cfg.effective_tts_provider()}")
+        print(f"effective_voice_id: {cfg.effective_voice_id()}")
         print(f"api_key_source: {cfg.api_key_source()}")
         print(f"api_key_present: {bool(cfg.api_key())}")
         print(f"last_brief: {last_brief_path()}")
@@ -740,6 +744,19 @@ def cmd_config(args: argparse.Namespace) -> int:
 
     if args.voice:
         cfg.voice_id = args.voice
+    if getattr(args, "tts_provider", None) is not None:
+        raw = str(args.tts_provider).strip().lower()
+        if raw in ("say", "local", "system", "os"):
+            raw = "macos"
+        if raw not in ("auto", "xai", "macos"):
+            print(
+                f"error: tts_provider must be auto|xai|macos (got {args.tts_provider!r})",
+                file=sys.stderr,
+            )
+            return 2
+        cfg.tts_provider = raw
+    if getattr(args, "macos_voice", None) is not None:
+        cfg.macos_voice = str(args.macos_voice).strip()
     if args.speed is not None:
         cfg.speed = float(args.speed)
     if args.mode:
@@ -961,7 +978,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("config", help="Show or update config")
     c.add_argument("--show", action="store_true")
-    c.add_argument("--voice", default=None)
+    c.add_argument(
+        "--tts-provider",
+        dest="tts_provider",
+        default=None,
+        help="auto|xai|macos — auto uses free macOS say when no API key",
+    )
+    c.add_argument(
+        "--macos-voice",
+        dest="macos_voice",
+        default=None,
+        help="macOS say -v voice name (empty string = system default); list: say -v '?'",
+    )
+    c.add_argument("--voice", default=None, help="xAI voice_id (e.g. ara)")
     c.add_argument("--speed", type=float, default=None)
     c.add_argument("--mode", choices=["brief", "verbatim"], default=None)
     c.add_argument("--autoplay", type=_bool_arg, default=None)

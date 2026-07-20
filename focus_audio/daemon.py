@@ -714,10 +714,13 @@ class FocusAudioDaemon:
     def _announce_mode(self, mode: str) -> None:
         """Speak a short 'Brief mode' / 'Verbatim mode' cue (cached TTS, say fallback)."""
         phrase = "Brief mode." if mode == "brief" else "Verbatim mode."
+        provider = self.cfg.effective_tts_provider()
+        voice = self.cfg.effective_voice_id()
+        ext = self.cfg.audio_suffix()
         cache = (
             data_dir()
             / "announce"
-            / f"{self.cfg.voice_id}_{self.cfg.speed}_{mode}.mp3"
+            / f"{provider}_{voice}_{self.cfg.speed}_{mode}{ext}"
         )
         played = False
         if not cache.is_file():
@@ -1042,7 +1045,11 @@ class FocusAudioDaemon:
                 ),
             },
             "config": {
+                "tts_provider": self.cfg.normalize_tts_provider(),
+                "tts_provider_effective": self.cfg.effective_tts_provider(),
                 "voice_id": self.cfg.voice_id,
+                "macos_voice": getattr(self.cfg, "macos_voice", "") or "",
+                "effective_voice_id": self.cfg.effective_voice_id(),
                 "speed": self.cfg.speed,
                 "autoplay": self.cfg.autoplay,
                 "enabled": self.cfg.enabled,
