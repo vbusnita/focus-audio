@@ -90,7 +90,11 @@ class FocusAudioDaemon:
             live_status = self._status
             # Post-turn path uses cfg.mode (or explicit override).
             post_mode = (mode or self.cfg.mode or "brief").lower()
-        live_pending = bool(live_q and (not live_q.closed or live_q.pending() > 0))
+        # Only real queued clips count as pending. An open *empty* queue used to
+        # count as pending via ``not closed``, which made Stop return
+        # live_covered with segments=0 and suppress the post-turn fallback
+        # (system-reminder turns / late first chunk).
+        live_pending = bool(live_q and live_q.pending() > 0)
         # Cover only when live has real work for this session — not bare
         # live_active. A watcher that never accepted/spoke a segment used to
         # return live_covered_* and silence the whole turn (no post-turn
@@ -177,6 +181,62 @@ class FocusAudioDaemon:
         if not session_id:
             return {"ok": False, "error": "missing session_id"}
 
+        # Same-session watcher still tailing: reuse it. UserPromptSubmit also
+        # fires for system-reminder turns that land in the same second as the
+        # prior turn's final agent_message_chunk + turn_completed. Hard-starting
+        # a new gen here used to clear the queue and kill the producer *before*
+        # it polled that final line — user heard mid-turn status, never the
+        # closing summary (diary session 019f990d… / 2026-07-25).
+        with self._lock:
+            live_q = self._live_queue
+            same_session = (
+                self._live_active
+                and self._live_session_id == session_id
+                and live_q is not None
+                and not live_q.closed
+            )
+            if same_session:
+                gen = self._live_gen
+                if cwd:
+                    self._live_cwd = cwd
+                    if self._last_session is not None:
+                        self._last_session["cwd"] = cwd
+                return {
+                    "ok": True,
+                    "live": gen,
+                    "session_id": session_id,
+                    "reused": True,
+                }
+
+            # Soft-drain: prior consumer still playing/queued clips. Do not
+            # clear mid-playback — schedule a real start after the queue empties.
+            soft_drain = bool(
+                live_q is not None
+                and (
+                    live_q.pending() > 0
+                    or self._status == "live_playing"
+                )
+            )
+            prior_gen = self._live_gen
+            prior_q = live_q
+
+        if soft_drain and prior_q is not None:
+            prior_q.close()  # producer side EOF; consumer keeps draining
+            self._cancel_post_live()
+            t = threading.Thread(
+                target=self._deferred_live_start,
+                args=(prior_gen, session_id, cwd),
+                daemon=True,
+                name=f"focus-audio-live-defer-{session_id[:8]}",
+            )
+            t.start()
+            return {
+                "ok": True,
+                "live": prior_gen,
+                "session_id": session_id,
+                "deferred": "drain_prior",
+            }
+
         # Bump job gen so a previous brief/speak job is cancelled; drop deferred brief.
         self._cancel_post_live()
         live_q = LiveSegmentQueue()
@@ -208,6 +268,42 @@ class FocusAudioDaemon:
         )
         t.start()
         return {"ok": True, "live": gen, "session_id": session_id}
+
+    def _deferred_live_start(
+        self,
+        prior_gen: int,
+        session_id: str,
+        cwd: Optional[str],
+    ) -> None:
+        """After a soft-closed prior live drains, start a fresh watcher."""
+        deadline = time.time() + 180.0
+        while time.time() < deadline:
+            with self._lock:
+                # A newer live_start / cancel already took over.
+                if self._live_gen != prior_gen:
+                    return
+                live_q = self._live_queue
+                status = self._status
+                active = self._live_active
+            pending = int(live_q.pending()) if live_q is not None else 0
+            playing = status == "live_playing" or self.player.is_playing()
+            if not active and pending == 0 and not playing:
+                break
+            if live_q is not None and live_q.closed and pending == 0 and not playing:
+                break
+            time.sleep(0.12)
+        with self._lock:
+            if self._live_gen != prior_gen:
+                return
+            # If something else already started a watcher, stop.
+            if self._live_active and self._live_session_id == session_id:
+                live_q = self._live_queue
+                if live_q is not None and not live_q.closed:
+                    return
+        try:
+            self.live_start(session_id, cwd)
+        except Exception as e:
+            print(f"focus-audio deferred live_start error: {e}", file=sys.stderr)
 
     def live_finish(self, reason: str = "finish") -> Dict[str, Any]:
         """Soft-stop: close the producer side; consumer drains the queue fully."""

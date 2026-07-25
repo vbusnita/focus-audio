@@ -249,6 +249,67 @@ def test_enqueue_empty_live_watcher_falls_through_to_post_turn():
     thr.assert_called()
 
 
+def test_enqueue_open_empty_queue_does_not_false_cover():
+    """Open empty LiveSegmentQueue must not count as pending live work.
+
+    Regression: ``live_pending = not closed or pending>0`` treated every waiting
+    watcher as coverage, so Stop returned live_covered with segments=0.
+    """
+    from focus_audio.live import LiveSegmentQueue
+
+    d = FocusAudioDaemon(
+        cfg=Config(
+            mode="brief",
+            live_verbatim=True,
+            live_then_brief=False,
+            live_skip_stop_brief=True,
+        )
+    )
+    d._live_session_id = "s1"
+    d._live_segments = 0
+    d._live_spoken = 0
+    d._live_active = True
+    d._status = "live"
+    d._live_queue = LiveSegmentQueue()  # open, empty
+    with patch("focus_audio.daemon.threading.Thread") as thr:
+        out = d.enqueue_session("s1", "/tmp", force=False)
+    assert out.get("skipped") is None
+    assert out.get("ok") is True
+    assert "job" in out
+    thr.assert_called()
+
+
+def test_live_start_reuses_same_session_open_watcher():
+    """Second UserPromptSubmit must not hard-cancel a still-tailing same-session live.
+
+    System-reminder turns fire live-start in the same second as the prior
+    turn's final agent_message_chunk; clearing the queue dropped that line.
+    """
+    from focus_audio.live import LiveSegmentQueue
+
+    d = FocusAudioDaemon(cfg=Config(enabled=True, live_verbatim=True))
+    q = LiveSegmentQueue()
+    d._live_queue = q
+    d._live_active = True
+    d._live_session_id = "s1"
+    d._live_gen = 7
+    d._live_segments = 5
+    d._live_spoken = 5
+    d._status = "live"
+
+    with patch("focus_audio.daemon.threading.Thread") as thr:
+        out = d.live_start("s1", "/tmp/proj")
+    assert out.get("ok") is True
+    assert out.get("reused") is True
+    assert out.get("live") == 7
+    thr.assert_not_called()
+    # Must not clear / replace the in-flight queue.
+    assert d._live_queue is q
+    assert q.closed is False
+    assert d._live_segments == 5
+    assert d._live_gen == 7
+
+
 def test_enqueue_live_covers_when_queue_has_pending():
     from focus_audio.live import LiveSegment, LiveSegmentQueue
 
