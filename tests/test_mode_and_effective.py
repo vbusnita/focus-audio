@@ -310,6 +310,111 @@ def test_live_start_reuses_same_session_open_watcher():
     assert d._live_gen == 7
 
 
+def test_live_start_hard_cuts_prior_playing_not_soft_drain():
+    """New UserPrompt must stop prior-turn audio and start a fresh watcher.
+
+    Soft-drain used to keep playing the old monologue and defer the new
+    watcher, so short turns were silenced (stale live_covered + missed EOF).
+    """
+    from focus_audio.live import LiveSegment, LiveSegmentQueue
+
+    d = FocusAudioDaemon(cfg=Config(enabled=True, live_verbatim=True))
+    d.player = MagicMock()
+    old_q = LiveSegmentQueue()
+    old_q.put(
+        LiveSegment(
+            text="old turn still speaking",
+            cleaned="old turn still speaking long enough for live queue",
+            index=0,
+        )
+    )
+    # Prior turn finished producing (queue closed) but consumer still playing.
+    old_q.close()
+    d._live_queue = old_q
+    d._live_active = True
+    d._live_session_id = "s1"
+    d._live_gen = 3
+    d._live_segments = 2
+    d._live_spoken = 1
+    d._status = "live_playing"
+
+    with patch("focus_audio.daemon.threading.Thread") as thr:
+        thr.return_value = MagicMock()
+        out = d.live_start("s1", "/tmp/proj")
+
+    assert out.get("ok") is True
+    assert out.get("reused") is not True
+    assert out.get("deferred") != "drain_prior"
+    assert out.get("hard_cut") is True
+    assert out.get("live") == 5  # cancel bumps gen, then start bumps again
+    d.player.stop.assert_called()
+    # Fresh queue, counters reset for the new turn.
+    assert d._live_queue is not old_q
+    assert d._live_queue is not None
+    assert d._live_queue.closed is False
+    assert d._live_segments == 0
+    assert d._live_spoken == 0
+    assert d._live_session_id == "s1"
+    assert d._live_active is True
+    thr.assert_called()
+
+
+def test_enqueue_stale_spoken_without_inflight_does_not_cover():
+    """Idle leftovers from a finished live turn must not silence the next Stop."""
+    d = FocusAudioDaemon(
+        cfg=Config(
+            mode="verbatim",
+            live_verbatim=True,
+            live_then_brief=False,
+            live_skip_stop_brief=True,
+        )
+    )
+    # Simulate natural completion leftovers *before* the sticky fix path:
+    # session id + spoken still set, but nothing in flight.
+    d._live_session_id = "s1"
+    d._live_segments = 2
+    d._live_spoken = 2
+    d._live_active = False
+    d._live_queue = None
+    d._status = "idle"
+    d._live_covered_session = None
+    with patch("focus_audio.daemon.threading.Thread") as thr:
+        thr.return_value = MagicMock()
+        out = d.enqueue_session("s1", "/tmp", force=False)
+    assert out.get("skipped") is None
+    assert out.get("ok") is True
+    assert "job" in out
+    thr.assert_called()
+
+
+def test_enqueue_finished_live_sticky_covers_late_stop_once():
+    """Late Stop after live drained should skip post-turn once, then clear."""
+    d = FocusAudioDaemon(
+        cfg=Config(
+            mode="verbatim",
+            live_verbatim=True,
+            live_skip_stop_brief=True,
+            live_then_brief=False,
+        )
+    )
+    d._live_covered_session = "s1"
+    d._live_active = False
+    d._live_session_id = None
+    d._live_segments = 0
+    d._live_spoken = 0
+    d._status = "idle"
+    out1 = d.enqueue_session("s1", force=False)
+    assert out1.get("skipped") == "live_covered_verbatim"
+    assert d._live_covered_session is None
+    # Second Stop / rebrief must be able to speak.
+    with patch("focus_audio.daemon.threading.Thread") as thr:
+        thr.return_value = MagicMock()
+        out2 = d.enqueue_session("s1", force=False)
+    assert out2.get("skipped") is None
+    assert "job" in out2
+    thr.assert_called()
+
+
 def test_enqueue_live_covers_when_queue_has_pending():
     from focus_audio.live import LiveSegment, LiveSegmentQueue
 
