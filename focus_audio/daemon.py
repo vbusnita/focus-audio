@@ -58,6 +58,10 @@ class FocusAudioDaemon:
         self._live_word_count = 0  # words actually spoken mid-turn (for coverage)
         self._live_active = False
         self._live_queue: Optional[LiveSegmentQueue] = None
+        # After a live turn finishes speaking, remember the session so a late
+        # Stop hook does not re-speak the same reply (inflight coverage is gone).
+        # Cleared on the next live_start / hard cancel.
+        self._live_covered_session: Optional[str] = None
         # Cancel token for deferred post-live brief (live_then_brief).
         self._post_live_token = 0
         self._last_mode_toggle_at = 0.0
@@ -88,6 +92,7 @@ class FocusAudioDaemon:
             live_then = bool(getattr(self.cfg, "live_then_brief", False))
             live_spoken = int(self._live_spoken or 0)
             live_status = self._status
+            live_covered_session = self._live_covered_session
             # Post-turn path uses cfg.mode (or explicit override).
             post_mode = (mode or self.cfg.mode or "brief").lower()
         # Only real queued clips count as pending. An open *empty* queue used to
@@ -95,21 +100,32 @@ class FocusAudioDaemon:
         # live_covered with segments=0 and suppress the post-turn fallback
         # (system-reminder turns / late first chunk).
         live_pending = bool(live_q and live_q.pending() > 0)
-        # Cover only when live has real work for this session — not bare
-        # live_active. A watcher that never accepted/spoke a segment used to
-        # return live_covered_* and silence the whole turn (no post-turn
-        # fallback). Mid-first-clip is covered via live_segs (on_accepted) or
+        # Cover only while live is *in flight* for this session — not bare
+        # live_active, and not stale counters after a prior turn finished.
+        # Stale live_spoken after natural completion used to make the *next*
+        # turn's Stop return live_covered_verbatim and silence the new reply
+        # (especially after soft-drain left old coverage sitting around).
+        # Mid-first-clip is covered via live_segs (on_accepted) or
         # status live_playing / pending queue.
         mid_live_play = live_status == "live_playing"
+        live_inflight = bool(live_active or live_pending or mid_live_play)
         live_has_work = bool(
             live_spoken > 0 or live_segs > 0 or live_pending or mid_live_play
         )
-        live_covers = bool(
+        live_covers_inflight = bool(
             live_sid
             and session_id
             and live_sid == session_id
+            and live_inflight
             and live_has_work
         )
+        # Late Stop after live already drained: still skip post-turn once.
+        live_covers_finished = bool(
+            session_id
+            and live_covered_session == session_id
+            and not live_inflight
+        )
+        live_covers = live_covers_inflight or live_covers_finished
         if not after_live and live_covers and skip_brief and not force:
             # Do not cancel live — drain the queue to the last word.
             #
@@ -134,6 +150,11 @@ class FocusAudioDaemon:
                 if post_mode == "verbatim"
                 else "live_covered"
             )
+            # Consume finished sticky so a later rebrief/enqueue can speak again.
+            if live_covers_finished:
+                with self._lock:
+                    if self._live_covered_session == session_id:
+                        self._live_covered_session = None
             return {
                 "ok": True,
                 "skipped": reason,
@@ -208,45 +229,24 @@ class FocusAudioDaemon:
                     "reused": True,
                 }
 
-            # Soft-drain: prior consumer still playing/queued clips. Do not
-            # clear mid-playback — schedule a real start after the queue empties.
-            soft_drain = bool(
-                live_q is not None
-                and (
-                    live_q.pending() > 0
-                    or self._status == "live_playing"
-                )
-            )
-            prior_gen = self._live_gen
-            prior_q = live_q
-
-        if soft_drain and prior_q is not None:
-            prior_q.close()  # producer side EOF; consumer keeps draining
-            self._cancel_post_live()
-            t = threading.Thread(
-                target=self._deferred_live_start,
-                args=(prior_gen, session_id, cwd),
-                daemon=True,
-                name=f"focus-audio-live-defer-{session_id[:8]}",
-            )
-            t.start()
-            return {
-                "ok": True,
-                "live": prior_gen,
-                "session_id": session_id,
-                "deferred": "drain_prior",
-            }
-
-        # Bump job gen so a previous brief/speak job is cancelled; drop deferred brief.
+        # Prior turn still speaking / queued: hard-cut, do not soft-drain.
+        # Soft-drain deferred the new watcher until the old clip finished, so a
+        # short new turn could complete (and its Stop return live_covered from
+        # stale counters) while the user still heard the previous monologue.
+        # New UserPrompt always owns the player from this point.
         self._cancel_post_live()
+        self._cancel_live()
+        try:
+            self.player.stop()
+        except Exception:
+            pass
+
         live_q = LiveSegmentQueue()
         with self._lock:
             self._job_gen += 1
             self._live_gen += 1
             gen = self._live_gen
             job_gen = self._job_gen
-            # Hard-cancel any prior live queue so its consumer exits.
-            old_q = self._live_queue
             self._live_queue = live_q
             self._live_active = True
             self._live_session_id = session_id
@@ -254,11 +254,10 @@ class FocusAudioDaemon:
             self._live_segments = 0
             self._live_spoken = 0
             self._live_word_count = 0
+            self._live_covered_session = None
             self._status = "live"
             self._error = None
             self._last_session = {"session_id": session_id, "cwd": cwd}
-        if old_q is not None:
-            old_q.clear()
 
         t = threading.Thread(
             target=self._run_live,
@@ -267,43 +266,7 @@ class FocusAudioDaemon:
             name=f"focus-audio-live-{gen}",
         )
         t.start()
-        return {"ok": True, "live": gen, "session_id": session_id}
-
-    def _deferred_live_start(
-        self,
-        prior_gen: int,
-        session_id: str,
-        cwd: Optional[str],
-    ) -> None:
-        """After a soft-closed prior live drains, start a fresh watcher."""
-        deadline = time.time() + 180.0
-        while time.time() < deadline:
-            with self._lock:
-                # A newer live_start / cancel already took over.
-                if self._live_gen != prior_gen:
-                    return
-                live_q = self._live_queue
-                status = self._status
-                active = self._live_active
-            pending = int(live_q.pending()) if live_q is not None else 0
-            playing = status == "live_playing" or self.player.is_playing()
-            if not active and pending == 0 and not playing:
-                break
-            if live_q is not None and live_q.closed and pending == 0 and not playing:
-                break
-            time.sleep(0.12)
-        with self._lock:
-            if self._live_gen != prior_gen:
-                return
-            # If something else already started a watcher, stop.
-            if self._live_active and self._live_session_id == session_id:
-                live_q = self._live_queue
-                if live_q is not None and not live_q.closed:
-                    return
-        try:
-            self.live_start(session_id, cwd)
-        except Exception as e:
-            print(f"focus-audio deferred live_start error: {e}", file=sys.stderr)
+        return {"ok": True, "live": gen, "session_id": session_id, "hard_cut": True}
 
     def live_finish(self, reason: str = "finish") -> Dict[str, Any]:
         """Soft-stop: close the producer side; consumer drains the queue fully."""
@@ -333,7 +296,8 @@ class FocusAudioDaemon:
         Also clear live coverage counters / session. Otherwise a mid-turn interrupt
         (CLI ``speak`` sample, skip, new job) leaves ``live_spoken > 0`` and Stop
         returns ``live_covered_verbatim`` — silencing the real end-of-turn speech.
-        Natural live completion does not call this; it keeps counters for skip logic.
+        Natural live completion does not call this; it records a finished-coverage
+        sticky for a late Stop instead.
         """
         with self._lock:
             self._live_gen += 1
@@ -344,6 +308,7 @@ class FocusAudioDaemon:
             self._live_segments = 0
             self._live_spoken = 0
             self._live_word_count = 0
+            self._live_covered_session = None
         if live_q is not None:
             live_q.clear()
 
@@ -578,6 +543,15 @@ class FocusAudioDaemon:
                         self._live_active = False
                         if self._live_queue is live_q:
                             self._live_queue = None
+                        # Drop inflight identity so the *next* turn cannot inherit
+                        # coverage from this one. Sticky session lets a late Stop
+                        # on *this* turn still skip a redundant post-turn read.
+                        if spoken > 0:
+                            self._live_covered_session = session_id
+                        self._live_session_id = None
+                        self._live_segments = 0
+                        self._live_spoken = 0
+                        self._live_word_count = 0
                         if self._status in ("live", "live_playing"):
                             self._status = "idle"
         except Exception as e:
@@ -588,6 +562,12 @@ class FocusAudioDaemon:
                     self._live_active = False
                     if self._live_queue is live_q:
                         self._live_queue = None
+                    self._live_session_id = None
+                    self._live_segments = 0
+                    self._live_spoken = 0
+                    self._live_word_count = 0
+                    # Incomplete / failed live must not suppress post-turn speech.
+                    self._live_covered_session = None
                 traceback.print_exc(file=sys.stderr)
         finally:
             live_q.close()
