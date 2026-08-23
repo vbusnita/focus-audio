@@ -327,7 +327,7 @@ focus-audio harden                # re-apply owner-only file permissions
 | `focus-audio mode brief` / `verbatim` | Change mode and re-speak the last turn |
 | `focus-audio live on` / `off` | Mid-turn speech |
 | `focus-audio on` / `off` | Master power |
-| `focus-audio toggle` / `pause` / `restart` / `skip` | Playback |
+| `focus-audio toggle` / `pause` / `restart` / `skip` / `stop` | Playback |
 | `focus-audio rebrief` | Force a new brief of the last turn |
 | `focus-audio purge --yes` | Delete local speech cache |
 | `focus-audio harden` | Owner-only permissions on the data directory |

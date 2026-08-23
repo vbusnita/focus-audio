@@ -925,7 +925,8 @@ def build_parser() -> argparse.ArgumentParser:
         ("skip", cmd_skip, "Stop and cancel current job"),
         ("rebrief", cmd_rebrief, "Force-regenerate last turn"),
     ]:
-        sp = sub.add_parser(name, help=help_)
+        kwargs = {"aliases": ["stop"]} if name == "skip" else {}
+        sp = sub.add_parser(name, help=help_, **kwargs)
         sp.set_defaults(func=fn)
 
     sh = sub.add_parser("shutdown", help="Stop the daemon")
